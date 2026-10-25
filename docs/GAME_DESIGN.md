@@ -34,7 +34,8 @@ The project is 100% data-driven and modular, written in strict TypeScript and bu
 | `src/core/mapGenerator.ts` | Deterministic `28×20` coastal & riverine valley generator with guaranteed harvestable deposits. |
 | `src/core/simulation.ts` | Pure, deterministic simulation engine: building placement, free first warehouse landing, road flood-fill connectivity, production cycles, need satisfaction, milestone Insight grants, event cooldowns, and win condition checks. |
 | `src/core/storage.ts` | `localStorage` save/load persistence (`rewritten_save_v1`). |
-| `src/render/canvasRenderer.ts` | HTML5 Canvas 2D renderer with desktop mouse/keyboard controls, mobile 1-finger touch drag/tap & 2-finger pinch-zoom, and `unknown-horizons/gfx`-referenced architectural illustrations. |
+| `src/render/isoAssets.ts` | 3D isometric geometry primitives (boxes, gable/hipped roofs, cylinders, cones, domes), 3D terrain blocks, natural props, and cached 3D building thumbnail generator. |
+| `src/render/canvasRenderer.ts` | HTML5 Canvas 2:1 isometric renderer with depth-sorted painter's pass, elevation-aware diamond hit testing, 3D placement ghosts, and desktop/mobile camera controls. |
 | `src/ui/gameUI.ts` | Responsive HUD, categorized build dock, live in-place inspector, collapsible mobile drawer, Future Knowledge modal, Historical Event modal, and Chronicle log. |
 | `tests/simulation.test.ts` | Automated Node test suite (`npm test`) covering core simulation rules. |
 

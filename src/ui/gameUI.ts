@@ -36,6 +36,7 @@ import {
 } from '../core/simulation.ts';
 import { clearSavedGame, saveGameToStorage } from '../core/storage.ts';
 import { CanvasRenderer } from '../render/canvasRenderer.ts';
+import { getBuildingThumbnailUrl } from '../render/isoAssets.ts';
 
 export class GameUI {
   private state: GameState;
@@ -494,6 +495,11 @@ export class GameUI {
           ? `<div class="lock-banner">🔒 Unlock via ${TECHNOLOGIES[def.requiredTechId!]?.name ?? 'Future Knowledge'}</div>`
           : '';
 
+        const thumbUrl = getBuildingThumbnailUrl(def.id);
+        const iconMarkup = thumbUrl
+          ? `<img src="${thumbUrl}" alt="${def.name}" class="build-iso-thumb" />`
+          : `<span class="build-icon">${def.icon}</span>`;
+
         return `
           <button
             class="build-card ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''} ${!canAfford && !isLocked ? 'unaffordable' : ''}"
@@ -501,7 +507,7 @@ export class GameUI {
             title="${def.description}"
           >
             <div class="build-card-top">
-              <span class="build-icon">${def.icon}</span>
+              ${iconMarkup}
               <div class="build-title-wrap">
                 <span class="build-name">${def.name}</span>
                 <span class="build-cat-tag">${def.category}</span>
@@ -763,10 +769,15 @@ export class GameUI {
       `;
     }
 
+    const inspThumbUrl = getBuildingThumbnailUrl(def.id);
+    const inspIconHtml = inspThumbUrl
+      ? `<img src="${inspThumbUrl}" alt="${def.name}" class="inspector-iso-thumb" />`
+      : `<span class="inspector-icon">${def.icon}</span>`;
+
     panel.innerHTML = `
       <div class="inspector-section">
         <div class="inspector-header">
-          <span class="inspector-icon">${def.icon}</span>
+          ${inspIconHtml}
           <div>
             <h4>${def.name}</h4>
             <span class="coords-tag">Tile (${bld.x}, ${bld.y}) • ${tDef.name}</span>

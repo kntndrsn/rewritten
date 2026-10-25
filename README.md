@@ -7,10 +7,10 @@
 - **Narrative Introduction & Skippable 7-Step Tutorial Walkthrough**:
   - Sets the scene at your May 1607 James River landfall and guides you through establishing basic colonial survival (felling Old-Growth Timber, laying Colonial Cart Roads, casting nets in the Coastal Shallows, sheltering Pioneers, opening a Market Square, and milling Planks) before unsealing the Future Archives.
   - Can be skipped at any point from either the introduction screen or the in-game walkthrough panel.
-- **Grid-Based Colonial Settlement & Camera**:
-  - Procedural 28×20 coastal and riverine valley map featuring Deep Atlantic Waters, Coastal Shallows, a winding Tidal River, sandy shorelines, Alluvial Loam floodplains, Old-Growth Timberlands, Granite Outcrops, and Iron Ore Seams.
-  - Colonial architectural & terrain illustrations inspired by and referencing [unknown-horizons/gfx](https://github.com/unknown-horizons/gfx) (see [`LICENSE`](./LICENSE)).
-  - Smooth pan (`WASD` / Arrow keys / Right-click drag) and cursor-centered zoom (Mouse wheel), plus service-radius overlays, tutorial target beacons, and placement validation ghosts.
+- **Isometric 3D Colonial Settlement & Camera**:
+  - Procedural 28×20 coastal and riverine valley map rendered in a 2:1 isometric projection with 3D terrain elevation slabs, recessed water basins, 3D pine/oak forests, granite outcrops, and iron ore seams.
+  - Bespoke 3D-styled isometric architectural models and UI thumbnails for all 17 buildings, inspired by and referencing [unknown-horizons/gfx](https://github.com/unknown-horizons/gfx) (see [`LICENSE`](./LICENSE)).
+  - Smooth pan (`WASD` / Arrow keys / Right-click drag) and cursor-centered zoom (Mouse wheel), plus isometric service-radius ellipses, tutorial target beacons, and 3D placement validation ghosts.
 - **Anno-Style Logistics & Production Chains**:
   - Road network flood-fill from your **Temporal Landing & Warehouse**.
   - **Timber** (`Lumberjack Camp`) ➔ **Milled Planks** (`Sawmill`)
