@@ -17,7 +17,8 @@ import {
   drawIsoRoadTile,
   drawIsoTerrainTile,
   fillIsoPoly,
-  getTerrainSurfaceW
+  getTerrainSurfaceW,
+  pickIsoTileAtScreenPoint
 } from './isoAssets.ts';
 
 export type InteractionTool =
@@ -305,43 +306,16 @@ export class CanvasRenderer {
     const localY = clientY - rect.top;
     const { halfW, halfH } = this.getHalfDims();
 
-    const dx = (localX - this.camera.offsetX) / halfW;
-    const dy = (localY - this.camera.offsetY) / halfH;
-    const gx = (dx + dy) * 0.5;
-    const gy = (dy - dx) * 0.5;
-    const baseX = Math.floor(gx);
-    const baseY = Math.floor(gy);
-
-    if (!this.lastState) {
-      return { x: baseX, y: baseY };
-    }
-
-    // Refine hit against elevated top diamonds in front-to-back order
-    const candidates: Array<{ x: number; y: number }> = [];
-    for (let oy = -1; oy <= 1; oy++) {
-      for (let ox = -1; ox <= 1; ox++) {
-        const tx = baseX + ox;
-        const ty = baseY + oy;
-        if (tx >= 0 && tx < this.lastState.width && ty >= 0 && ty < this.lastState.height) {
-          candidates.push({ x: tx, y: ty });
-        }
-      }
-    }
-    candidates.sort((a, b) => b.x + b.y - (a.x + a.y));
-
-    for (const c of candidates) {
-      const tile = this.lastState.tiles[c.y][c.x];
-      const wTop = getTerrainSurfaceW(tile.terrain, tile.elevation);
-      const { cx, cy } = this.tileCenterToScreen(c.x, c.y);
-      const surfaceCy = cy - wTop * (2 * halfH);
-      const normDist =
-        Math.abs(localX - cx) / halfW + Math.abs(localY - surfaceCy) / halfH;
-      if (normDist <= 1.0) {
-        return c;
-      }
-    }
-
-    return { x: baseX, y: baseY };
+    return pickIsoTileAtScreenPoint(
+      localX,
+      localY,
+      this.camera.offsetX,
+      this.camera.offsetY,
+      halfW,
+      halfH,
+      this.lastState,
+      this.tool.mode
+    );
   }
 
   public updateCameraInput(dtSeconds: number): void {

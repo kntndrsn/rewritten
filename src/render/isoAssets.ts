@@ -1162,25 +1162,6 @@ export function drawIsoBuildingModel(
         right: '#64748b'
       });
 
-      // Central 3D Stone Fountain & Obelisk
-      drawIsoCylinder(ctx, pt, halfW, halfH, 0.5, 0.5, 0.16, 0.06, 0.16, {
-        top: '#38bdf8',
-        left: '#94a3b8',
-        right: '#475569',
-        stroke: 'rgba(15, 23, 42, 0.3)'
-      });
-      drawIsoBox(ctx, pt, 0.45, 0.45, 0.16, 0.55, 0.55, 0.48, {
-        top: '#f8fafc',
-        left: '#e2e8f0',
-        right: '#94a3b8'
-      });
-      drawIsoPyramidRoof(ctx, pt, 0.44, 0.44, 0.56, 0.56, 0.48, 0.62, {
-        left: '#fbbf24',
-        right: '#b45309',
-        backLeft: '#fde047',
-        backRight: '#d97706'
-      });
-
       // Stall 1 (Back-left, Terracotta awning)
       drawIsoBox(ctx, pt, 0.14, 0.16, 0.06, 0.4, 0.44, 0.26, {
         top: '#fef3c7',
@@ -1203,6 +1184,25 @@ export function drawIsoBuildingModel(
         leftSlope: '#2dd4bf',
         rightSlope: '#0f766e',
         gableWall: '#99f6e4'
+      });
+
+      // Central 3D Stone Fountain & Obelisk (drawn after rear stalls and before front stall)
+      drawIsoCylinder(ctx, pt, halfW, halfH, 0.5, 0.5, 0.16, 0.06, 0.16, {
+        top: '#38bdf8',
+        left: '#94a3b8',
+        right: '#475569',
+        stroke: 'rgba(15, 23, 42, 0.3)'
+      });
+      drawIsoBox(ctx, pt, 0.45, 0.45, 0.16, 0.55, 0.55, 0.48, {
+        top: '#f8fafc',
+        left: '#e2e8f0',
+        right: '#94a3b8'
+      });
+      drawIsoPyramidRoof(ctx, pt, 0.44, 0.44, 0.56, 0.56, 0.48, 0.62, {
+        left: '#fbbf24',
+        right: '#b45309',
+        backLeft: '#fde047',
+        backRight: '#d97706'
       });
 
       // Stall 3 (Front-left, Gold/Burgundy awning)
@@ -1506,7 +1506,16 @@ export function drawIsoBuildingModel(
     }
 
     case 'bakery': {
-      // Brick Bakehouse Wing
+      // Tall 3D Windmill Tower (drawn first as rear structure)
+      drawIsoCylinder(ctx, pt, halfW, halfH, 0.32, 0.44, 0.16, 0, 0.68, {
+        top: '#78350f',
+        left: '#f5f5f4',
+        right: '#a8a29e',
+        stroke: 'rgba(15, 23, 42, 0.35)'
+      });
+      drawIsoCone(ctx, pt, halfW, halfH, 0.32, 0.44, 0.18, 0.68, 0.88, '#b45309', '#78350f');
+
+      // Foreground Brick Bakehouse Wing
       drawIsoBox(ctx, pt, 0.46, 0.36, 0, 0.88, 0.84, 0.36, {
         top: '#9a3412',
         left: '#ea580c',
@@ -1524,15 +1533,6 @@ export function drawIsoBuildingModel(
         left: '#9a3412',
         right: '#7c2d12'
       });
-
-      // Tall 3D Windmill Tower
-      drawIsoCylinder(ctx, pt, halfW, halfH, 0.32, 0.44, 0.16, 0, 0.68, {
-        top: '#78350f',
-        left: '#f5f5f4',
-        right: '#a8a29e',
-        stroke: 'rgba(15, 23, 42, 0.35)'
-      });
-      drawIsoCone(ctx, pt, halfW, halfH, 0.32, 0.44, 0.18, 0.68, 0.88, '#b45309', '#78350f');
 
       // Rotating 3D Windmill Sails mounted on the SW face of the tower
       const hub = pt(0.24, 0.56, 0.62);
@@ -1936,4 +1936,132 @@ export function getBuildingThumbnailUrl(defId: string): string {
   thumbnailCache.set(defId, url);
   return url;
 }
+
+/**
+ * Returns the vertical 3D hit-box height (in units of tileH = 2 * halfH) for a placed building.
+ */
+export function getBuildingHitHeight(bld: PlacedBuilding): number {
+  const def = BUILDINGS[bld.defId];
+  if (!def || def.isRoad) return 0;
+  if (bld.isConstructed === false) return 0.55;
+  switch (bld.defId) {
+    case 'founding_camp':
+      return 1.05;
+    case 'enlightened_manor':
+      return 1.06;
+    case 'chronicle_observatory':
+      return 1.05;
+    case 'bakery':
+    case 'blacksmith':
+      return 0.92;
+    case 'quarry':
+    case 'iron_mine':
+      return 0.84;
+    case 'colonial_homestead':
+      return 0.8;
+    case 'apothecary':
+      return 0.78;
+    case 'sawmill':
+      return 0.72;
+    case 'wheat_farm':
+      return 0.7;
+    case 'fishery':
+      return 0.68;
+    case 'market_square':
+    case 'pioneer_cabin':
+      return 0.66;
+    case 'herb_garden':
+      return 0.62;
+    case 'lumberjack_hut':
+      return 0.58;
+    default:
+      return 0.6;
+  }
+}
+
+/**
+ * Hit-tests a screen point (localX, localY) against the isometric map.
+ * In 'select' and 'demolish' modes, visible 3D structures are hit-tested in reverse painter's
+ * draw order before falling back to elevated terrain diamond picking, so clicking a tall roof
+ * that overlaps a rear tile selects the foreground structure rather than the tile behind it.
+ * In 'build' mode, ground diamond picking is retained for predictable placement.
+ */
+export function pickIsoTileAtScreenPoint(
+  localX: number,
+  localY: number,
+  offsetX: number,
+  offsetY: number,
+  halfW: number,
+  halfH: number,
+  state: GameState | null,
+  toolMode: 'select' | 'build' | 'demolish' = 'select'
+): { x: number; y: number } {
+  const dx = (localX - offsetX) / halfW;
+  const dy = (localY - offsetY) / halfH;
+  const gx = (dx + dy) * 0.5;
+  const gy = (dy - dx) * 0.5;
+  const baseX = Math.floor(gx);
+  const baseY = Math.floor(gy);
+
+  if (!state) {
+    return { x: baseX, y: baseY };
+  }
+
+  const candidates: Array<{ x: number; y: number }> = [];
+  for (let oy = -1; oy <= 2; oy++) {
+    for (let ox = -1; ox <= 2; ox++) {
+      const tx = baseX + ox;
+      const ty = baseY + oy;
+      if (tx >= 0 && tx < state.width && ty >= 0 && ty < state.height) {
+        candidates.push({ x: tx, y: ty });
+      }
+    }
+  }
+
+  // Sort in reverse painter's draw order (front-to-back: highest x + y first, then highest x)
+  candidates.sort((a, b) => b.x + b.y - (a.x + a.y) || b.x - a.x);
+
+  // 1. In select/demolish modes, hit-test visible 3D structures first in reverse draw order
+  if (toolMode === 'select' || toolMode === 'demolish') {
+    for (const c of candidates) {
+      const tile = state.tiles[c.y][c.x];
+      if (!tile.buildingId) continue;
+      const bld = state.buildings[tile.buildingId];
+      if (!bld) continue;
+      const roofH = getBuildingHitHeight(bld);
+      if (roofH <= 0) continue;
+
+      const wTop = getTerrainSurfaceW(tile.terrain, tile.elevation);
+      const cx = offsetX + (c.x - c.y) * halfW;
+      const cy = offsetY + (c.x + c.y + 1) * halfH;
+      const surfaceCy = cy - wTop * (2 * halfH);
+
+      const nx = Math.abs(localX - cx) / halfW;
+      if (nx > 0.84) continue;
+
+      const bottomEdgeY = surfaceCy + (1.0 - nx) * halfH;
+      const topEdgeY = surfaceCy - roofH * (2 * halfH) + nx * halfH * 0.5;
+      if (localY <= bottomEdgeY && localY >= topEdgeY) {
+        return c;
+      }
+    }
+  }
+
+  // 2. Fall back to elevated terrain diamond hit-testing in reverse draw order
+  for (const c of candidates) {
+    const tile = state.tiles[c.y][c.x];
+    const wTop = getTerrainSurfaceW(tile.terrain, tile.elevation);
+    const cx = offsetX + (c.x - c.y) * halfW;
+    const cy = offsetY + (c.x + c.y + 1) * halfH;
+    const surfaceCy = cy - wTop * (2 * halfH);
+    const normDist =
+      Math.abs(localX - cx) / halfW + Math.abs(localY - surfaceCy) / halfH;
+    if (normDist <= 1.0) {
+      return c;
+    }
+  }
+
+  return { x: baseX, y: baseY };
+}
+
 

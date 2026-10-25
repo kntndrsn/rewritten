@@ -27,7 +27,11 @@ import {
   upgradeHouse
 } from '../src/core/simulation.ts';
 import { TUTORIAL_STEPS } from '../src/data/tutorial.ts';
-import { createLocalProjector, getTerrainSurfaceW } from '../src/render/isoAssets.ts';
+import {
+  createLocalProjector,
+  getTerrainSurfaceW,
+  pickIsoTileAtScreenPoint
+} from '../src/render/isoAssets.ts';
 
 describe('Rewritten Core Simulation Engine', () => {
   it('starts new games with zero auto-placed buildings and a free first Temporal Landing', () => {
@@ -558,6 +562,47 @@ describe('Rewritten Core Simulation Engine', () => {
     assert.ok(getTerrainSurfaceW('coastal_water') < getTerrainSurfaceW('grass'));
     assert.ok(getTerrainSurfaceW('stone_deposit') > getTerrainSurfaceW('grass'));
     assert.ok(getTerrainSurfaceW('iron_deposit') >= getTerrainSurfaceW('stone_deposit'));
+  });
+
+  it('hit-tests visible foreground building roofs before rear tiles in select and demolish modes while retaining ground picking in build mode', () => {
+    const state = createInitialGameState(1607);
+    state.resources.wood = 100;
+    state.resources.planks = 100;
+    state.resources.stone = 100;
+    state.resources.coin = 500;
+
+    // Place a rear Pioneer Cabin at (7, 7) and a tall foreground Temporal Landing at (8, 8)
+    placeBuilding(state, 'founding_camp', 8, 8);
+    placeBuilding(state, 'pioneer_cabin', 7, 7);
+    stepSimulation(state, 6);
+
+    const offsetX = 500;
+    const offsetY = 100;
+    const halfW = 46;
+    const halfH = 23;
+
+    // Screen center of tile (8, 8) is (offsetX, offsetY + 17 * halfH).
+    // A point near the upper spire/roof of (8, 8) at cy - 1.6 * halfH projects over the ground diamond of rear tile (7, 7).
+    const fgCx = offsetX + (8 - 8) * halfW;
+    const fgCy = offsetY + (8 + 8 + 1) * halfH;
+    const roofClickX = fgCx;
+    const roofClickY = fgCy - 1.6 * halfH;
+
+    // In select and demolish modes, clicking the foreground roof must pick (8, 8), not (7, 7)
+    assert.deepEqual(
+      pickIsoTileAtScreenPoint(roofClickX, roofClickY, offsetX, offsetY, halfW, halfH, state, 'select'),
+      { x: 8, y: 8 }
+    );
+    assert.deepEqual(
+      pickIsoTileAtScreenPoint(roofClickX, roofClickY, offsetX, offsetY, halfW, halfH, state, 'demolish'),
+      { x: 8, y: 8 }
+    );
+
+    // In build mode, ground diamond picking is retained so hovering that screen position targets (7, 7)
+    assert.deepEqual(
+      pickIsoTileAtScreenPoint(roofClickX, roofClickY, offsetX, offsetY, halfW, halfH, state, 'build'),
+      { x: 7, y: 7 }
+    );
   });
 });
 
