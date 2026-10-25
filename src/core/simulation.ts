@@ -1216,11 +1216,20 @@ export function stepSimulation(state: GameState, dtSeconds: number): void {
       state.activeEventDeadlineDay !== null &&
       state.day >= state.activeEventDeadlineDay
     ) {
-      // Deferred decision window expired — reopen the event modal for final resolution
-      state.eventDeferred = false;
-      state.speed = 0;
-      state.dayProgress = 0;
-      break;
+      const activeEvt = HISTORICAL_EVENTS.find((e) => e.id === state.activeEventId);
+      const anyAffordable = activeEvt
+        ? activeEvt.choices.some((c) => canAffordEventChoice(state, c).ok)
+        : true;
+      if (!anyAffordable) {
+        // Extend the deadline by 1 day so an expired deferred event never deadlocks play when no choice is affordable
+        state.activeEventDeadlineDay = state.day + 1;
+      } else {
+        // Deferred decision window expired — reopen the event modal for final resolution
+        state.eventDeferred = false;
+        state.speed = 0;
+        state.dayProgress = 0;
+        break;
+      }
     }
     checkAndTriggerHistoricalEvents(state);
     if (state.activeEventId && !state.eventDeferred) {
@@ -1416,29 +1425,36 @@ export function evaluateTutorialProgress(
       // Advance the active step pointer unless the user is intentionally browsing an earlier step while the guide is open
       const canAutoAdvance =
         !state.tutorialBrowsingManually || !state.tutorialActive || state.tutorialStepIndex === step.index;
-      if (canAutoAdvance && state.tutorialStepIndex <= step.index) {
+      if (canAutoAdvance) {
         completedStepTitle = step.title;
         advanced = true;
         state.tutorialBrowsingManually = false;
-        while (
-          state.tutorialStepIndex < TUTORIAL_STEPS.length &&
-          state.completedTutorialStepIds.includes(TUTORIAL_STEPS[state.tutorialStepIndex].id)
-        ) {
-          state.tutorialStepIndex += 1;
-          if (
-            state.tutorialStepIndex < TUTORIAL_STEPS.length &&
-            TUTORIAL_STEPS[state.tutorialStepIndex].id === 'unseal_future_knowledge'
-          ) {
-            unsealFutureTrunks(state);
-          }
-        }
-        if (state.tutorialStepIndex >= TUTORIAL_STEPS.length) {
+        const firstIncomplete = TUTORIAL_STEPS.findIndex(
+          (s) => !state.completedTutorialStepIds.includes(s.id)
+        );
+        if (firstIncomplete === -1) {
           state.tutorialStepIndex = TUTORIAL_STEPS.length - 1;
           state.tutorialCompleted = true;
           state.tutorialActive = false;
+        } else {
+          state.tutorialStepIndex = firstIncomplete;
+          if (TUTORIAL_STEPS[firstIncomplete].id === 'unseal_future_knowledge') {
+            unsealFutureTrunks(state);
+          }
         }
       }
     }
+  }
+
+  // Also ensure that if all steps are already satisfied (e.g. after a reordered step migration), the tutorial marks completed
+  if (
+    !state.tutorialCompleted &&
+    !state.tutorialBrowsingManually &&
+    TUTORIAL_STEPS.every((s) => state.completedTutorialStepIds.includes(s.id))
+  ) {
+    state.tutorialStepIndex = TUTORIAL_STEPS.length - 1;
+    state.tutorialCompleted = true;
+    state.tutorialActive = false;
   }
 
   return { advanced, completedStepTitle };
@@ -1746,8 +1762,19 @@ export function skipTutorial(state: GameState): void {
 
 export function deferHistoricalEvent(state: GameState): boolean {
   if (!state.activeEventId) return false;
-  if (state.activeEventDeadlineDay !== null && state.day >= state.activeEventDeadlineDay) {
+  const activeEvt = HISTORICAL_EVENTS.find((e) => e.id === state.activeEventId);
+  const anyAffordable = activeEvt
+    ? activeEvt.choices.some((c) => canAffordEventChoice(state, c).ok)
+    : true;
+  if (
+    state.activeEventDeadlineDay !== null &&
+    state.day >= state.activeEventDeadlineDay &&
+    anyAffordable
+  ) {
     return false;
+  }
+  if (state.activeEventDeadlineDay !== null && state.day >= state.activeEventDeadlineDay) {
+    state.activeEventDeadlineDay = state.day + 2;
   }
   state.eventDeferred = true;
   if (state.speed === 0) {

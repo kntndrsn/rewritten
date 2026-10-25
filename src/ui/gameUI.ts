@@ -138,11 +138,13 @@ export class GameUI {
     document.getElementById('btn-toggle-sidebar')?.addEventListener('click', () => {
       const sb = document.getElementById('right-sidebar');
       const isHidden = sb?.classList.contains('sidebar-hidden') ?? true;
+      this.renderInspector(true);
       this.setSidebarVisible(isHidden);
     });
 
     document.getElementById('btn-close-sidebar')?.addEventListener('click', () => {
       this.renderer.selectedTile = null;
+      this.renderInspector(true);
       this.setSidebarVisible(false);
     });
 
@@ -1122,10 +1124,14 @@ export class GameUI {
       this.state.activeEventDeadlineDay !== null
         ? Math.max(0, this.state.activeEventDeadlineDay - this.state.day)
         : 0;
+    const anyChoiceAffordable = evt.choices.some((c) => canAffordEventChoice(this.state, c).ok);
+    const canDeferNow = daysLeft > 0 || !anyChoiceAffordable;
     const deadlineText =
       daysLeft > 0
         ? `⏳ Decision Window: ${daysLeft} Colonial Day${daysLeft === 1 ? '' : 's'} Left`
-        : `⏰ Final Day — Decision Required Now`;
+        : anyChoiceAffordable
+          ? `⏰ Final Day — Decision Required Now`
+          : `⏳ Gathering Required Supplies...`;
 
     const choicesHtml = evt.choices
       .map((c) => {
@@ -1195,9 +1201,9 @@ export class GameUI {
       </div>
       <div class="event-choices-list">${choicesHtml}</div>
       ${
-        daysLeft > 0
+        canDeferNow
           ? `<button id="btn-defer-event" type="button" class="btn-defer-event">
-              ⏳ Decide Later (${daysLeft}d left — Gather Insight & Supplies First)
+              ⏳ Decide Later (${daysLeft > 0 ? `${daysLeft}d left — ` : ''}Gather Insight & Supplies First)
             </button>`
           : ''
       }

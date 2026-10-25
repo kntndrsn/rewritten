@@ -502,5 +502,34 @@ describe('Rewritten Core Simulation Engine', () => {
     );
     assert.equal(state.tutorialStepIndex, 2);
   });
+
+  it('extends deferred event deadline if no choice is affordable at expiry and completes reordered tutorial steps', () => {
+    const state = createInitialGameState(1607, true);
+    skipTutorial(state);
+    state.completedEventIds.push('starving_winter_1609');
+    state.day = 25;
+    state.lastEventDay = 1;
+    state.totalPopulation = 24;
+    state.resources.tools = 4;
+
+    checkAndTriggerHistoricalEvents(state);
+    assert.equal(state.activeEventId, 'indigenous_envoy_1611');
+    assert.equal(deferHistoricalEvent(state), true);
+
+    // Spend all tools before the 5-day deadline expires
+    state.resources.tools = 0;
+    stepSimulation(state, 5 * SECONDS_PER_DAY);
+    assert.equal(
+      state.eventDeferred,
+      true,
+      'Deferred event should stay deferred and extend deadline when no choice is affordable at expiry'
+    );
+    assert.ok((state.activeEventDeadlineDay ?? 0) > state.day);
+
+    // Once tools are available again, the next day reopens the event cleanly
+    state.resources.tools = 4;
+    stepSimulation(state, SECONDS_PER_DAY);
+    assert.equal(state.eventDeferred, false);
+  });
 });
 
