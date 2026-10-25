@@ -27,6 +27,7 @@ import {
   upgradeHouse
 } from '../src/core/simulation.ts';
 import { TUTORIAL_STEPS } from '../src/data/tutorial.ts';
+import { createLocalProjector, getTerrainSurfaceW } from '../src/render/isoAssets.ts';
 
 describe('Rewritten Core Simulation Engine', () => {
   it('starts new games with zero auto-placed buildings and a free first Temporal Landing', () => {
@@ -530,6 +531,33 @@ describe('Rewritten Core Simulation Engine', () => {
     state.resources.tools = 4;
     stepSimulation(state, SECONDS_PER_DAY);
     assert.equal(state.eventDeferred, false);
+  });
+
+  it('projects 3D isometric tile coordinates and terrain surface elevations accurately', () => {
+    const cx = 400;
+    const cy = 300;
+    const halfW = 46;
+    const halfH = 23;
+    const pt = createLocalProjector(cx, cy, halfW, halfH, 0);
+
+    // Center of diamond (u=0.5, v=0.5, w=0) maps to (cx, cy)
+    assert.deepEqual(pt(0.5, 0.5, 0), { x: cx, y: cy });
+    // Top corner (u=0, v=0, w=0) maps to (cx, cy - halfH)
+    assert.deepEqual(pt(0, 0, 0), { x: cx, y: cy - halfH });
+    // Right corner (u=1, v=0, w=0) maps to (cx + halfW, cy)
+    assert.deepEqual(pt(1, 0, 0), { x: cx + halfW, y: cy });
+    // Bottom corner (u=1, v=1, w=0) maps to (cx, cy + halfH)
+    assert.deepEqual(pt(1, 1, 0), { x: cx, y: cy + halfH });
+    // Left corner (u=0, v=1, w=0) maps to (cx - halfW, cy)
+    assert.deepEqual(pt(0, 1, 0), { x: cx - halfW, y: cy });
+    // Vertical 3D height w=1 lifts screen Y upward by 2 * halfH
+    assert.deepEqual(pt(0.5, 0.5, 1), { x: cx, y: cy - 2 * halfH });
+
+    // Water is recessed below land, and mineral outcrops are elevated above grass
+    assert.ok(getTerrainSurfaceW('deep_water') < getTerrainSurfaceW('coastal_water'));
+    assert.ok(getTerrainSurfaceW('coastal_water') < getTerrainSurfaceW('grass'));
+    assert.ok(getTerrainSurfaceW('stone_deposit') > getTerrainSurfaceW('grass'));
+    assert.ok(getTerrainSurfaceW('iron_deposit') >= getTerrainSurfaceW('stone_deposit'));
   });
 });
 

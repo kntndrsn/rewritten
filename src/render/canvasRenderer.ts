@@ -7,9 +7,18 @@ import {
   canPlaceBuilding,
   canUpgradeHouse,
   getDynamicTutorialTargets,
-  getOrthogonalNeighbors,
   getTile
 } from '../core/simulation.ts';
+import {
+  createLocalProjector,
+  drawIsoBuildingModel,
+  drawIsoConstructionSite,
+  drawIsoNaturalProp,
+  drawIsoRoadTile,
+  drawIsoTerrainTile,
+  fillIsoPoly,
+  getTerrainSurfaceW
+} from './isoAssets.ts';
 
 export type InteractionTool =
   | { mode: 'select' }
@@ -25,8 +34,12 @@ export interface CameraState {
 export class CanvasRenderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  private baseTileSize = 54;
-  public camera: CameraState = { offsetX: 80, offsetY: 40, zoom: 1.0 };
+  private baseTileW = 92;
+  private baseTileH = 46;
+  private viewportW = 0;
+  private viewportH = 0;
+  private lastState: GameState | null = null;
+  public camera: CameraState = { offsetX: 520, offsetY: 80, zoom: 1.0 };
 
   public hoveredTile: { x: number; y: number } | null = null;
   public selectedTile: { x: number; y: number } | null = { x: 7, y: 8 };
@@ -67,11 +80,31 @@ export class CanvasRenderer {
     this.onHoverChangeCallback = cb;
   }
 
+  private getHalfDims(): { halfW: number; halfH: number } {
+    return {
+      halfW: (this.baseTileW * this.camera.zoom) * 0.5,
+      halfH: (this.baseTileH * this.camera.zoom) * 0.5
+    };
+  }
+
+  /**
+   * Projects a tile's (x, y) center on the w=0 reference plane to screen coordinates.
+   */
+  public tileCenterToScreen(tileX: number, tileY: number): { cx: number; cy: number } {
+    const { halfW, halfH } = this.getHalfDims();
+    return {
+      cx: this.camera.offsetX + (tileX - tileY) * halfW,
+      cy: this.camera.offsetY + (tileX + tileY + 1) * halfH
+    };
+  }
+
   public centerOnTile(tileX: number, tileY: number): void {
     const rect = this.canvas.getBoundingClientRect();
-    const ts = this.baseTileSize * this.camera.zoom;
-    this.camera.offsetX = rect.width / 2 - (tileX + 0.5) * ts;
-    this.camera.offsetY = rect.height / 2 - (tileY + 0.5) * ts;
+    const width = rect.width || this.viewportW || 960;
+    const height = rect.height || this.viewportH || 640;
+    const { halfW, halfH } = this.getHalfDims();
+    this.camera.offsetX = width * 0.5 - (tileX - tileY) * halfW;
+    this.camera.offsetY = height * 0.5 - (tileX + tileY + 1) * halfH;
   }
 
   public resize(): void {
@@ -80,6 +113,12 @@ export class CanvasRenderer {
     const dpr = window.devicePixelRatio || 1;
     const width = parent.clientWidth;
     const height = parent.clientHeight;
+    if (this.viewportW > 0 && this.viewportH > 0 && width > 0 && height > 0) {
+      this.camera.offsetX += (width - this.viewportW) * 0.5;
+      this.camera.offsetY += (height - this.viewportH) * 0.5;
+    }
+    this.viewportW = width;
+    this.viewportH = height;
     this.canvas.width = Math.max(1, Math.floor(width * dpr));
     this.canvas.height = Math.max(1, Math.floor(height * dpr));
     this.canvas.style.width = `${width}px`;
@@ -122,7 +161,6 @@ export class CanvasRenderer {
 
     window.addEventListener('mouseup', (e) => {
       if (e.button === 2 && !this.panMoved) {
-        // Stationary right-click cancels active build/demolish mode
         const coords = this.hoveredTile ?? this.screenToTile(e.clientX, e.clientY);
         if (this.onTileClickCallback && coords) {
           this.onTileClickCallback(coords.x, coords.y, 2);
@@ -170,7 +208,6 @@ export class CanvasRenderer {
         const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
         const nextZoom = Math.max(0.55, Math.min(1.85, prevZoom * zoomFactor));
 
-        // Zoom toward cursor
         const worldX = (mouseX - this.camera.offsetX) / prevZoom;
         const worldY = (mouseY - this.camera.offsetY) / prevZoom;
 
@@ -181,7 +218,6 @@ export class CanvasRenderer {
       { passive: false }
     );
 
-    // Mobile & Touch Gestures (1-finger pan/tap, 2-finger pinch-zoom)
     this.canvas.addEventListener(
       'touchstart',
       (e) => {
@@ -267,14 +303,49 @@ export class CanvasRenderer {
     const rect = this.canvas.getBoundingClientRect();
     const localX = clientX - rect.left;
     const localY = clientY - rect.top;
-    const ts = this.baseTileSize * this.camera.zoom;
-    const tileX = Math.floor((localX - this.camera.offsetX) / ts);
-    const tileY = Math.floor((localY - this.camera.offsetY) / ts);
-    return { x: tileX, y: tileY };
+    const { halfW, halfH } = this.getHalfDims();
+
+    const dx = (localX - this.camera.offsetX) / halfW;
+    const dy = (localY - this.camera.offsetY) / halfH;
+    const gx = (dx + dy) * 0.5;
+    const gy = (dy - dx) * 0.5;
+    const baseX = Math.floor(gx);
+    const baseY = Math.floor(gy);
+
+    if (!this.lastState) {
+      return { x: baseX, y: baseY };
+    }
+
+    // Refine hit against elevated top diamonds in front-to-back order
+    const candidates: Array<{ x: number; y: number }> = [];
+    for (let oy = -1; oy <= 1; oy++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        const tx = baseX + ox;
+        const ty = baseY + oy;
+        if (tx >= 0 && tx < this.lastState.width && ty >= 0 && ty < this.lastState.height) {
+          candidates.push({ x: tx, y: ty });
+        }
+      }
+    }
+    candidates.sort((a, b) => b.x + b.y - (a.x + a.y));
+
+    for (const c of candidates) {
+      const tile = this.lastState.tiles[c.y][c.x];
+      const wTop = getTerrainSurfaceW(tile.terrain, tile.elevation);
+      const { cx, cy } = this.tileCenterToScreen(c.x, c.y);
+      const surfaceCy = cy - wTop * (2 * halfH);
+      const normDist =
+        Math.abs(localX - cx) / halfW + Math.abs(localY - surfaceCy) / halfH;
+      if (normDist <= 1.0) {
+        return c;
+      }
+    }
+
+    return { x: baseX, y: baseY };
   }
 
   public updateCameraInput(dtSeconds: number): void {
-    const panSpeed = 360 * dtSeconds;
+    const panSpeed = 420 * dtSeconds;
     if (this.keysPressed.has('w') || this.keysPressed.has('arrowup')) {
       this.camera.offsetY += panSpeed;
     }
@@ -290,6 +361,7 @@ export class CanvasRenderer {
   }
 
   public render(state: GameState, dtSeconds: number): void {
+    this.lastState = state;
     this.animTime += dtSeconds;
     this.updateCameraInput(dtSeconds);
 
@@ -297,349 +369,259 @@ export class CanvasRenderer {
     const rect = this.canvas.getBoundingClientRect();
     ctx.clearRect(0, 0, rect.width, rect.height);
 
-    // Deep ocean background
-    ctx.fillStyle = '#0f2537';
+    // Deep ocean atmospheric backdrop
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, rect.height);
+    bgGrad.addColorStop(0, '#091929');
+    bgGrad.addColorStop(0.5, '#0f2537');
+    bgGrad.addColorStop(1, '#081523');
+    ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, rect.width, rect.height);
 
-    const ts = this.baseTileSize * this.camera.zoom;
+    const { halfW, halfH } = this.getHalfDims();
+    const maxSum = state.width + state.height - 2;
 
-    // 1. Draw Terrain Tiles
-    for (let y = 0; y < state.height; y++) {
-      for (let x = 0; x < state.width; x++) {
-        const px = this.camera.offsetX + x * ts;
-        const py = this.camera.offsetY + y * ts;
-        if (px + ts < 0 || py + ts < 0 || px > rect.width || py > rect.height) {
+    // 1. Pass 1: 3D Terrain Blocks (Back-to-Front painter's order)
+    for (let sum = 0; sum <= maxSum; sum++) {
+      const minX = Math.max(0, sum - (state.height - 1));
+      const maxX = Math.min(state.width - 1, sum);
+      for (let x = minX; x <= maxX; x++) {
+        const y = sum - x;
+        const { cx, cy } = this.tileCenterToScreen(x, y);
+        if (
+          cx + halfW < -60 ||
+          cx - halfW > rect.width + 60 ||
+          cy + halfH * 2 < -80 ||
+          cy - halfH * 2 > rect.height + 80
+        ) {
+          continue;
+        }
+        drawIsoTerrainTile(ctx, state, x, y, cx, cy, halfW, halfH, this.animTime);
+      }
+    }
+
+    // 2. Pass 2: Ground Overlays (Service Radius, Tutorial Highlights, Selection & Hover Diamonds)
+    this.drawServiceRadiusOverlay(ctx, state, halfW, halfH);
+    this.drawTutorialGroundHighlights(ctx, state, halfW, halfH);
+
+    if (this.selectedTile) {
+      const { x, y } = this.selectedTile;
+      if (x >= 0 && x < state.width && y >= 0 && y < state.height) {
+        this.drawTileDiamondOutline(ctx, state, x, y, halfW, halfH, '#ffd166', 2.6);
+      }
+    }
+
+    if (this.hoveredTile) {
+      const { x, y } = this.hoveredTile;
+      if (x >= 0 && x < state.width && y >= 0 && y < state.height) {
+        this.drawHoverGroundHighlight(ctx, state, x, y, halfW, halfH);
+      }
+    }
+
+    // 3. Pass 3: 3D Structures, Roads, Trees, Outcrops, and Placement Ghost (Back-to-Front)
+    for (let sum = 0; sum <= maxSum; sum++) {
+      const minX = Math.max(0, sum - (state.height - 1));
+      const maxX = Math.min(state.width - 1, sum);
+      for (let x = minX; x <= maxX; x++) {
+        const y = sum - x;
+        const { cx, cy } = this.tileCenterToScreen(x, y);
+        if (
+          cx + halfW < -80 ||
+          cx - halfW > rect.width + 80 ||
+          cy + halfH * 2 < -120 ||
+          cy - halfH * 3.5 > rect.height + 120
+        ) {
           continue;
         }
 
         const tile = state.tiles[y][x];
-        const tDef = TERRAINS[tile.terrain];
+        const wTop = getTerrainSurfaceW(tile.terrain, tile.elevation);
+        const surfaceCy = cy - wTop * (2 * halfH);
 
-        ctx.fillStyle = (x + y) % 2 === 0 ? tDef.color : tDef.secondaryColor;
-        ctx.fillRect(px, py, ts + 0.6, ts + 0.6);
+        if (tile.buildingId) {
+          const bld = state.buildings[tile.buildingId];
+          if (bld) {
+            const roofH = this.drawBuilding3D(ctx, state, bld, cx, cy, surfaceCy, halfW, halfH, wTop);
+            this.drawBuildingOverlayHUD(ctx, state, bld, cx, surfaceCy, roofH, halfW, halfH);
+          }
+        } else {
+          drawIsoNaturalProp(ctx, state, x, y, cx, cy, halfW, halfH);
+        }
 
-        this.drawShorelineBorders(ctx, state, x, y, px, py, ts, tile.terrain);
-        this.drawTerrainDetails(ctx, state, x, y, px, py, ts, tile.terrain, tile.decorationSeed);
-
-        // Subtle grid line
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(px, py, ts, ts);
-      }
-    }
-
-    // 2. Draw Service Radius Overlay if a service building is selected or being placed
-    this.drawServiceRadiusOverlay(ctx, state, ts);
-
-    // 3. Draw Placed Buildings & Roads
-    for (let y = 0; y < state.height; y++) {
-      for (let x = 0; x < state.width; x++) {
-        const tile = state.tiles[y][x];
-        if (!tile.buildingId) continue;
-        const bld = state.buildings[tile.buildingId];
-        if (!bld) continue;
-
-        const px = this.camera.offsetX + x * ts;
-        const py = this.camera.offsetY + y * ts;
-        if (px + ts < 0 || py + ts < 0 || px > rect.width || py > rect.height) continue;
-
-        this.drawBuilding(ctx, state, bld, px, py, ts);
-      }
-    }
-
-    // 3.5. Draw Tutorial Target Beacons if tutorial is active
-    this.drawTutorialHighlights(ctx, state, ts);
-
-    // 4. Draw Selection Highlight
-    if (this.selectedTile) {
-      const { x, y } = this.selectedTile;
-      if (x >= 0 && x < state.width && y >= 0 && y < state.height) {
-        const px = this.camera.offsetX + x * ts;
-        const py = this.camera.offsetY + y * ts;
-        ctx.strokeStyle = '#ffd166';
-        ctx.lineWidth = 2.5;
-        ctx.strokeRect(px + 1.5, py + 1.5, ts - 3, ts - 3);
-
-        const selTile = state.tiles[y][x];
+        // If hovering in build mode on this tile, render a translucent 3D building ghost in depth order
         if (
-          !selTile.buildingId &&
-          (selTile.terrain === 'stone_deposit' || selTile.terrain === 'iron_deposit')
+          this.tool.mode === 'build' &&
+          this.hoveredTile &&
+          this.hoveredTile.x === x &&
+          this.hoveredTile.y === y &&
+          !tile.buildingId
         ) {
-          this.drawTerrainLabelBadge(ctx, selTile.terrain, px, py, ts);
+          this.drawBuildGhost3D(ctx, state, x, y, cx, cy, halfW, halfH, wTop);
         }
       }
     }
 
-    // 5. Draw Hover / Placement Ghost
-    if (this.hoveredTile) {
-      const { x, y } = this.hoveredTile;
-      if (x >= 0 && x < state.width && y >= 0 && y < state.height) {
-        const px = this.camera.offsetX + x * ts;
-        const py = this.camera.offsetY + y * ts;
-        this.drawHoverAndPlacementGhost(ctx, state, x, y, px, py, ts);
-      }
-    }
+    // 4. Pass 4: Floating Tutorial Callouts & Deposit / Placement Tooltips
+    this.drawTutorialFloatingLabels(ctx, state, halfW, halfH);
+    this.drawSelectionAndHoverBadges(ctx, state, halfW, halfH);
   }
 
-  private drawShorelineBorders(
+  private drawTileDiamondOutline(
     ctx: CanvasRenderingContext2D,
     state: GameState,
     x: number,
     y: number,
-    px: number,
-    py: number,
-    ts: number,
-    terrain: string
-  ): void {
-    const isWater =
-      terrain === 'deep_water' || terrain === 'coastal_water' || terrain === 'river';
-    if (isWater) return;
-
-    const band = Math.max(3, ts * 0.09);
-    ctx.fillStyle = '#d4be8d';
-
-    const top = getTile(state, x, y - 1);
-    const right = getTile(state, x + 1, y);
-    const bottom = getTile(state, x, y + 1);
-    const left = getTile(state, x - 1, y);
-
-    const checkWater = (t?: { terrain: string }) =>
-      Boolean(
-        t &&
-          (t.terrain === 'deep_water' ||
-            t.terrain === 'coastal_water' ||
-            t.terrain === 'river')
-      );
-
-    if (checkWater(top)) ctx.fillRect(px, py, ts, band);
-    if (checkWater(bottom)) ctx.fillRect(px, py + ts - band, ts, band);
-    if (checkWater(left)) ctx.fillRect(px, py, band, ts);
-    if (checkWater(right)) ctx.fillRect(px + ts - band, py, band, ts);
-  }
-
-  private drawTerrainDetails(
-    ctx: CanvasRenderingContext2D,
-    state: GameState,
-    x: number,
-    y: number,
-    px: number,
-    py: number,
-    ts: number,
-    terrain: string,
-    seed: number
+    halfW: number,
+    halfH: number,
+    strokeStyle: string,
+    lineWidth: number,
+    fillStyle?: string
   ): void {
     const tile = state.tiles[y][x];
-    // Skip tall tree/rock decorations if a building is placed on top
-    const hasBuilding = Boolean(tile.buildingId);
-
-    if (terrain === 'deep_water' || terrain === 'coastal_water' || terrain === 'river') {
-      const waveOffset = Math.sin(this.animTime * 2 + x * 0.9 + y * 0.7) * (ts * 0.06);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
-      ctx.lineWidth = Math.max(1, ts * 0.03);
-      ctx.beginPath();
-      ctx.moveTo(px + ts * 0.2, py + ts * 0.45 + waveOffset);
-      ctx.quadraticCurveTo(
-        px + ts * 0.5,
-        py + ts * 0.35 + waveOffset,
-        px + ts * 0.78,
-        py + ts * 0.45 + waveOffset
-      );
-      ctx.stroke();
-
-      if (terrain === 'coastal_water' || terrain === 'river') {
-        // Subtle fish ripple on some tiles
-        if (seed > 0.65 && !hasBuilding) {
-          ctx.fillStyle = 'rgba(144, 224, 239, 0.28)';
-          ctx.beginPath();
-          ctx.arc(px + ts * 0.5, py + ts * 0.62, ts * 0.1, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-      return;
-    }
-
-    if (terrain === 'fertile_soil' && !hasBuilding) {
-      ctx.strokeStyle = 'rgba(233, 196, 106, 0.25)';
-      ctx.lineWidth = Math.max(1, ts * 0.035);
-      for (let i = 1; i <= 3; i++) {
-        const ly = py + (ts * i) / 4;
-        ctx.beginPath();
-        ctx.moveTo(px + ts * 0.15, ly);
-        ctx.lineTo(px + ts * 0.85, ly);
-        ctx.stroke();
-      }
-      return;
-    }
-
-    if (terrain === 'forest' && !hasBuilding) {
-      const nearLumberjack = getOrthogonalNeighbors(state, x, y).some(
-        (n) => n.buildingId && state.buildings[n.buildingId]?.defId === 'lumberjack_hut'
-      );
-      if (nearLumberjack) {
-        ctx.fillStyle = '#5c4033';
-        ctx.fillRect(px + ts * 0.66, py + ts * 0.66, ts * 0.16, ts * 0.12);
-        ctx.fillStyle = '#d4a373';
-        ctx.beginPath();
-        ctx.arc(px + ts * 0.74, py + ts * 0.66, ts * 0.08, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      // Draw 3 layered colonial pines/oaks
-      const centers = [
-        { cx: 0.32, cy: 0.36, r: 0.2 },
-        { cx: 0.68, cy: 0.38, r: 0.19 },
-        { cx: 0.5, cy: 0.65, r: 0.23 }
-      ];
-      for (const tree of centers) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
-        ctx.beginPath();
-        ctx.arc(px + ts * (tree.cx + 0.03), py + ts * (tree.cy + 0.05), ts * tree.r, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = '#1b4332';
-        ctx.beginPath();
-        ctx.arc(px + ts * tree.cx, py + ts * tree.cy, ts * tree.r, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = '#40916c';
-        ctx.beginPath();
-        ctx.arc(
-          px + ts * (tree.cx - 0.03),
-          py + ts * (tree.cy - 0.03),
-          ts * (tree.r * 0.65),
-          0,
-          Math.PI * 2
-        );
-        ctx.fill();
-      }
-      return;
-    }
-
-    if ((terrain === 'stone_deposit' || terrain === 'iron_deposit') && !hasBuilding) {
-      ctx.fillStyle = terrain === 'stone_deposit' ? '#adb5bd' : '#b5651d';
-      ctx.beginPath();
-      ctx.moveTo(px + ts * 0.2, py + ts * 0.78);
-      ctx.lineTo(px + ts * 0.38, py + ts * 0.25);
-      ctx.lineTo(px + ts * 0.65, py + ts * 0.22);
-      ctx.lineTo(px + ts * 0.84, py + ts * 0.75);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = terrain === 'stone_deposit' ? '#dee2e6' : '#f4a261';
-      ctx.beginPath();
-      ctx.arc(px + ts * 0.5, py + ts * 0.48, ts * 0.12, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    const wTop = getTerrainSurfaceW(tile.terrain, tile.elevation);
+    const { cx, cy } = this.tileCenterToScreen(x, y);
+    const pt = createLocalProjector(cx, cy, halfW, halfH, wTop + 0.008);
+    fillIsoPoly(
+      ctx,
+      pt,
+      [
+        [0.03, 0.03, 0],
+        [0.97, 0.03, 0],
+        [0.97, 0.97, 0],
+        [0.03, 0.97, 0]
+      ],
+      fillStyle ?? 'rgba(0, 0, 0, 0)',
+      strokeStyle,
+      lineWidth
+    );
   }
 
-  private drawBuilding(
+  private drawBuilding3D(
     ctx: CanvasRenderingContext2D,
     state: GameState,
     bld: PlacedBuilding,
-    px: number,
-    py: number,
-    ts: number
-  ): void {
+    cx: number,
+    cy: number,
+    surfaceCy: number,
+    halfW: number,
+    halfH: number,
+    wTop: number
+  ): number {
     const def = BUILDINGS[bld.defId];
-    if (!def) return;
+    if (!def) return 0.4;
 
     if (def.isRoad) {
-      this.drawRoadTile(ctx, state, bld.x, bld.y, px, py, ts);
-      if (bld.isConstructed === false) {
-        const ratio = Math.min(
-          1,
-          Math.max(0, (bld.constructionProgressSeconds || 0) / (bld.buildTimeSeconds || 1.5))
-        );
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-        ctx.fillRect(px + 6, py + ts - 8, ts - 12, 4);
-        ctx.fillStyle = '#fbbf24';
-        ctx.fillRect(px + 6, py + ts - 8, (ts - 12) * ratio, 4);
-      }
-      return;
+      drawIsoRoadTile(ctx, state, bld.x, bld.y, cx, cy, halfW, halfH);
+      return 0.1;
     }
 
-    const pad = ts * 0.09;
-    const bx = px + pad;
-    const by = py + pad;
-    const bw = ts - pad * 2;
-    const bh = ts - pad * 2;
+    const pt = createLocalProjector(cx, cy, halfW, halfH, wTop);
 
     if (bld.isConstructed === false) {
       const ratio = Math.min(
         1,
         Math.max(0, (bld.constructionProgressSeconds || 0) / (bld.buildTimeSeconds || 5))
       );
-      ctx.fillStyle = 'rgba(30, 41, 59, 0.76)';
-      ctx.fillRect(bx, by, bw, bh);
-
-      ctx.strokeStyle = '#d97706';
-      ctx.lineWidth = 1.6;
-      ctx.setLineDash([4, 3]);
-      ctx.strokeRect(bx, by, bw, bh);
-      ctx.setLineDash([]);
-
-      ctx.strokeStyle = 'rgba(217, 119, 6, 0.45)';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(bx + 3, by + 3);
-      ctx.lineTo(bx + bw - 3, by + bh - 10);
-      ctx.moveTo(bx + bw - 3, by + 3);
-      ctx.lineTo(bx + 3, by + bh - 10);
-      ctx.stroke();
-
-      ctx.font = `${Math.floor(ts * 0.32)}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-      ctx.fillText(def.icon, px + ts * 0.5, py + ts * 0.42);
-
-      const barX = bx + 3;
-      const barY = by + bh - 7;
-      const barW = bw - 6;
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.fillRect(barX, barY, barW, 5);
-      ctx.fillStyle = '#fbbf24';
-      ctx.fillRect(barX, barY, barW * ratio, 5);
-      return;
+      drawIsoConstructionSite(ctx, pt, ratio);
+      return 0.55;
     }
 
-    // Drop shadow
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.36)';
-    ctx.fillRect(bx + 2, by + 3, bw, bh);
-
-    // Roof / border accent
     const activeRecipe = def.recipes?.find((r) => r.id === bld.activeRecipeId);
     const isAnachronisticActive = Boolean(
       activeRecipe?.isAnachronistic || def.category === 'temporal'
     );
 
-    // Unknown Horizons-inspired colonial architectural illustration
-    this.drawColonialArchitecture(ctx, bld, bx, by, bw, bh, px, py, ts, isAnachronisticActive);
+    // Anachronistic / Temporal base aura ring on the ground
+    if (isAnachronisticActive) {
+      fillIsoPoly(
+        ctx,
+        pt,
+        [
+          [0.08, 0.08, 0.004],
+          [0.92, 0.08, 0.004],
+          [0.92, 0.92, 0.004],
+          [0.08, 0.92, 0.004]
+        ],
+        'rgba(192, 132, 252, 0.14)',
+        'rgba(192, 132, 252, 0.65)',
+        1.4
+      );
+    }
 
-    ctx.strokeStyle = isAnachronisticActive ? '#c084fc' : def.accentColor;
-    ctx.lineWidth = isAnachronisticActive ? 2.2 : 1.5;
-    ctx.strokeRect(bx, by, bw, bh);
+    const roofH = drawIsoBuildingModel(
+      ctx,
+      bld,
+      pt,
+      halfW,
+      halfH,
+      this.animTime,
+      isAnachronisticActive
+    );
 
     if (
       bld.status === 'working' &&
-      (bld.defId === 'bakery' || bld.defId === 'blacksmith' || bld.defId === 'apothecary')
+      (bld.defId === 'bakery' ||
+        bld.defId === 'blacksmith' ||
+        bld.defId === 'apothecary' ||
+        bld.defId === 'pioneer_cabin' ||
+        bld.defId === 'colonial_homestead')
     ) {
-      this.drawChimneySmoke(ctx, px + ts * 0.74, py + ts * 0.22, ts, isAnachronisticActive);
+      const smokeTop = surfaceCy - roofH * (2 * halfH) * 0.85;
+      this.drawChimneySmoke(ctx, cx + halfW * 0.18, smokeTop, halfH * 2, isAnachronisticActive);
     }
 
-    // Building Icon badge
-    ctx.font = `${Math.floor(ts * 0.26)}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(def.icon, px + ts * 0.73, py + ts * 0.3);
+    return roofH;
+  }
 
-    // Production progress bar at bottom of building
+  private drawBuildingOverlayHUD(
+    ctx: CanvasRenderingContext2D,
+    state: GameState,
+    bld: PlacedBuilding,
+    cx: number,
+    surfaceCy: number,
+    roofH: number,
+    halfW: number,
+    halfH: number
+  ): void {
+    const def = BUILDINGS[bld.defId];
+    if (!def) return;
+    const scale = this.camera.zoom;
+
+    if (bld.isConstructed === false) {
+      const ratio = Math.min(
+        1,
+        Math.max(0, (bld.constructionProgressSeconds || 0) / (bld.buildTimeSeconds || 5))
+      );
+      const barW = Math.max(24, halfW * 0.9);
+      const barX = cx - barW * 0.5;
+      const barY = surfaceCy + halfH * 0.35;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
+      ctx.fillRect(barX, barY, barW, 5);
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillRect(barX, barY, barW * ratio, 5);
+
+      if (!def.isRoad) {
+        ctx.font = `${Math.max(12, Math.floor(16 * scale))}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(def.icon, cx, surfaceCy - halfH * 0.65);
+      }
+      return;
+    }
+
+    if (def.isRoad) return;
+
+    const activeRecipe = def.recipes?.find((r) => r.id === bld.activeRecipeId);
+    const isAnachronisticActive = Boolean(
+      activeRecipe?.isAnachronistic || def.category === 'temporal'
+    );
+
+    // Production progress bar positioned cleanly on the front base of the building
     if (def.recipes && def.recipes.length > 0 && activeRecipe) {
       const ratio = Math.min(1, Math.max(0, bld.progressSeconds / activeRecipe.cycleSeconds));
-      const barX = bx + 3;
-      const barY = by + bh - 6;
-      const barW = bw - 6;
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      const barW = Math.max(22, halfW * 0.72);
+      const barX = cx - barW * 0.5;
+      const barY = surfaceCy + halfH * 0.14;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
       ctx.fillRect(barX, barY, barW, 4);
       ctx.fillStyle =
         bld.status === 'working'
@@ -650,27 +632,40 @@ export class CanvasRenderer {
       ctx.fillRect(barX, barY, barW * ratio, 4);
     }
 
-    // Housing resident count & upgrade indicator
+    // Housing resident pill & upgrade indicator
     if (def.housing) {
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
-      ctx.fillRect(bx + 2, by + bh - 12, bw - 4, 10);
+      const pillW = Math.max(26, halfW * 0.72);
+      const pillH = Math.max(11, halfH * 0.44);
+      const pillX = cx - pillW * 0.5;
+      const pillY = surfaceCy - halfH * 0.08;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.86)';
+      ctx.fillRect(pillX, pillY, pillW, pillH);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.lineWidth = 0.8;
+      ctx.strokeRect(pillX, pillY, pillW, pillH);
+
       ctx.fillStyle = '#f8fafc';
-      ctx.font = `bold ${Math.max(8, Math.floor(ts * 0.17))}px system-ui, sans-serif`;
+      ctx.font = `bold ${Math.max(8, Math.floor(9.5 * scale))}px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillText(
         `${Math.floor(bld.residents)}/${def.housing.capacity}`,
-        px + ts * 0.5,
-        by + bh - 7
+        cx,
+        pillY + pillH * 0.52
       );
 
       const upg = canUpgradeHouse(state, bld.id);
       if (upg.valid) {
+        const badgeX = cx + halfW * 0.36;
+        const badgeY = surfaceCy - roofH * (2 * halfH) * 0.7;
+        const r = Math.max(6, halfH * 0.3);
         ctx.fillStyle = '#22c55e';
         ctx.beginPath();
-        ctx.arc(px + ts - pad - 4, py + pad + 4, ts * 0.11, 0, Math.PI * 2);
+        ctx.arc(badgeX, badgeY, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#052e16';
-        ctx.font = `bold ${Math.max(8, Math.floor(ts * 0.16))}px system-ui, sans-serif`;
-        ctx.fillText('▲', px + ts - pad - 4, py + pad + 4.5);
+        ctx.font = `bold ${Math.max(8, Math.floor(9 * scale))}px system-ui, sans-serif`;
+        ctx.fillText('▲', badgeX, badgeY + 0.5);
       }
     }
 
@@ -681,181 +676,21 @@ export class CanvasRenderer {
       bld.status === 'missing_inputs' ||
       bld.status === 'paused'
     ) {
+      const badgeX = cx - halfW * 0.32;
+      const badgeY = surfaceCy - roofH * (2 * halfH) * 0.72;
+      const r = Math.max(6, halfH * 0.32);
       ctx.fillStyle = bld.status === 'paused' ? '#64748b' : '#ef4444';
       ctx.beginPath();
-      ctx.arc(px + pad + 5, py + pad + 5, ts * 0.12, 0, Math.PI * 2);
+      ctx.arc(badgeX, badgeY, r, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.fillStyle = '#ffffff';
-      ctx.font = `bold ${Math.max(8, Math.floor(ts * 0.16))}px system-ui, sans-serif`;
-      ctx.fillText(bld.status === 'paused' ? '⏸' : '!', px + pad + 5, py + pad + 5.5);
-    }
-  }
-
-  private drawColonialArchitecture(
-    ctx: CanvasRenderingContext2D,
-    bld: PlacedBuilding,
-    bx: number,
-    by: number,
-    bw: number,
-    bh: number,
-    px: number,
-    py: number,
-    ts: number,
-    isAnachronistic: boolean
-  ): void {
-    const def = BUILDINGS[bld.defId];
-    ctx.fillStyle = def.color;
-    ctx.fillRect(bx, by, bw, bh);
-
-    switch (bld.defId) {
-      case 'founding_camp': {
-        ctx.fillStyle = '#cbb389';
-        ctx.fillRect(bx + 2, by + bh * 0.55, bw - 4, bh * 0.42);
-        ctx.fillStyle = '#2b4562';
-        ctx.fillRect(bx + 4, by + bh * 0.22, bw - 8, bh * 0.48);
-        ctx.fillStyle = '#456990';
-        ctx.beginPath();
-        ctx.moveTo(bx + 2, by + bh * 0.35);
-        ctx.lineTo(px + ts * 0.5, by + 4);
-        ctx.lineTo(bx + bw - 2, by + bh * 0.35);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = '#a36836';
-        ctx.fillRect(bx + 6, by + bh * 0.68, bw * 0.22, bh * 0.2);
-        ctx.fillRect(bx + bw * 0.34, by + bh * 0.7, bw * 0.2, bh * 0.18);
-        break;
-      }
-      case 'market_square': {
-        ctx.fillStyle = '#7f8c8d';
-        ctx.fillRect(bx + 2, by + 2, bw - 4, bh - 4);
-        ctx.fillStyle = '#e76f51';
-        ctx.fillRect(bx + 4, by + 5, bw * 0.44, bh * 0.34);
-        ctx.fillStyle = '#f4f1de';
-        ctx.fillRect(bx + 4 + bw * 0.14, by + 5, bw * 0.14, bh * 0.34);
-        ctx.fillStyle = '#2a9d8f';
-        ctx.fillRect(bx + 5, by + bh * 0.52, bw * 0.42, bh * 0.32);
-        ctx.fillStyle = '#e2e8f0';
-        ctx.beginPath();
-        ctx.arc(px + ts * 0.62, py + ts * 0.6, ts * 0.1, 0, Math.PI * 2);
-        ctx.fill();
-        break;
-      }
-      case 'pioneer_cabin':
-      case 'colonial_homestead':
-      case 'enlightened_manor': {
-        const wallColor =
-          bld.defId === 'pioneer_cabin'
-            ? '#7f5539'
-            : bld.defId === 'colonial_homestead'
-              ? '#e6ccb2'
-              : '#d8e2dc';
-        const roofColor =
-          bld.defId === 'pioneer_cabin'
-            ? '#9c6644'
-            : bld.defId === 'colonial_homestead'
-              ? '#9e2a2b'
-              : '#4a4e69';
-        ctx.fillStyle = wallColor;
-        ctx.fillRect(bx + bw * 0.12, by + bh * 0.38, bw * 0.68, bh * 0.4);
-        ctx.fillStyle = roofColor;
-        ctx.beginPath();
-        ctx.moveTo(bx + bw * 0.06, by + bh * 0.42);
-        ctx.lineTo(px + ts * 0.42, by + bh * 0.12);
-        ctx.lineTo(bx + bw * 0.82, by + bh * 0.42);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = '#fde047';
-        ctx.fillRect(bx + bw * 0.22, by + bh * 0.48, bw * 0.14, bh * 0.14);
-        ctx.fillRect(bx + bw * 0.48, by + bh * 0.48, bw * 0.14, bh * 0.14);
-        break;
-      }
-      case 'lumberjack_hut': {
-        ctx.fillStyle = '#583101';
-        ctx.fillRect(bx + 4, by + bh * 0.25, bw * 0.52, bh * 0.45);
-        ctx.fillStyle = '#bc6c25';
-        ctx.fillRect(bx + bw * 0.56, by + bh * 0.54, bw * 0.34, bh * 0.12);
-        ctx.fillRect(bx + bw * 0.58, by + bh * 0.42, bw * 0.3, bh * 0.1);
-        break;
-      }
-      case 'sawmill': {
-        ctx.fillStyle = '#7f4f24';
-        ctx.fillRect(bx + 4, by + bh * 0.28, bw * 0.55, bh * 0.48);
-        const angle = bld.status === 'working' ? this.animTime * 3.5 : 0;
-        const wx = bx + bw * 0.68;
-        const wy = by + bh * 0.58;
-        const wr = ts * 0.13;
-        ctx.save();
-        ctx.translate(wx, wy);
-        ctx.rotate(angle);
-        ctx.strokeStyle = isAnachronistic ? '#e9d5ff' : '#cbd5e1';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, wr, 0, Math.PI * 2);
-        ctx.moveTo(-wr, 0);
-        ctx.lineTo(wr, 0);
-        ctx.moveTo(0, -wr);
-        ctx.lineTo(0, wr);
-        ctx.stroke();
-        ctx.restore();
-        break;
-      }
-      case 'fishery': {
-        ctx.fillStyle = '#8d6e63';
-        ctx.fillRect(bx + 2, by + bh * 0.52, bw - 4, bh * 0.32);
-        ctx.fillStyle = '#1d3557';
-        ctx.fillRect(bx + 5, by + bh * 0.2, bw * 0.52, bh * 0.42);
-        break;
-      }
-      case 'wheat_farm': {
-        ctx.fillStyle = '#eab308';
-        for (let r = 0; r < 3; r++) {
-          ctx.fillRect(bx + 4, by + bh * (0.38 + r * 0.16), bw - 8, bh * 0.1);
-        }
-        ctx.fillStyle = '#991b1b';
-        ctx.fillRect(bx + 4, by + 4, bw * 0.42, bh * 0.28);
-        break;
-      }
-      case 'bakery': {
-        ctx.fillStyle = '#9a3412';
-        ctx.fillRect(bx + 5, by + bh * 0.32, bw * 0.56, bh * 0.46);
-        const sailAngle = bld.status === 'working' ? this.animTime * 2.2 : 0.4;
-        const sx = bx + bw * 0.34;
-        const sy = by + bh * 0.36;
-        const sr = ts * 0.17;
-        ctx.save();
-        ctx.translate(sx, sy);
-        ctx.rotate(sailAngle);
-        ctx.strokeStyle = '#fef3c7';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(-sr, 0);
-        ctx.lineTo(sr, 0);
-        ctx.moveTo(0, -sr);
-        ctx.lineTo(0, sr);
-        ctx.stroke();
-        ctx.restore();
-        break;
-      }
-      case 'blacksmith': {
-        ctx.fillStyle = '#1f2937';
-        ctx.fillRect(bx + 4, by + bh * 0.26, bw - 8, bh * 0.52);
-        ctx.fillStyle = isAnachronistic ? '#c084fc' : '#f97316';
-        ctx.beginPath();
-        ctx.arc(px + ts * 0.38, py + ts * 0.56, ts * 0.11, 0, Math.PI * 2);
-        ctx.fill();
-        break;
-      }
-      case 'chronicle_observatory': {
-        ctx.fillStyle = '#3b0764';
-        ctx.fillRect(bx + 4, by + bh * 0.42, bw - 8, bh * 0.38);
-        ctx.fillStyle = '#a855f7';
-        ctx.beginPath();
-        ctx.arc(px + ts * 0.44, py + ts * 0.44, ts * 0.17, Math.PI, 0);
-        ctx.fill();
-        break;
-      }
-      default:
-        break;
+      ctx.font = `bold ${Math.max(8, Math.floor(9.5 * scale))}px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(bld.status === 'paused' ? '⏸' : '!', badgeX, badgeY + 0.5);
     }
   }
 
@@ -866,24 +701,25 @@ export class CanvasRenderer {
     ts: number,
     isAnachronistic: boolean
   ): void {
-    for (let i = 0; i < 2; i++) {
-      const phase = (this.animTime * 0.9 + i * 0.5) % 1;
-      const sx = x + Math.sin(phase * Math.PI * 2) * 3;
-      const sy = y - phase * (ts * 0.22);
-      const alpha = (1 - phase) * 0.5;
+    for (let i = 0; i < 3; i++) {
+      const phase = (this.animTime * 0.75 + i * 0.33) % 1;
+      const sx = x + Math.sin(phase * Math.PI * 2) * 4 + phase * 5;
+      const sy = y - phase * (ts * 0.34);
+      const alpha = (1 - phase) * 0.48;
       ctx.fillStyle = isAnachronistic
         ? `rgba(216, 180, 254, ${alpha})`
         : `rgba(226, 232, 240, ${alpha})`;
       ctx.beginPath();
-      ctx.arc(sx, sy, ts * (0.05 + phase * 0.05), 0, Math.PI * 2);
+      ctx.arc(sx, sy, ts * (0.045 + phase * 0.055), 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
-  private drawTutorialHighlights(
+  private drawTutorialGroundHighlights(
     ctx: CanvasRenderingContext2D,
     state: GameState,
-    ts: number
+    halfW: number,
+    halfH: number
   ): void {
     if (!state.tutorialActive) return;
     const step = TUTORIAL_STEPS[state.tutorialStepIndex];
@@ -892,90 +728,73 @@ export class CanvasRenderer {
     if (targets.length === 0) return;
 
     const pulse = (Math.sin(this.animTime * 4) + 1) * 0.5;
-
     for (const target of targets) {
-      const px = this.camera.offsetX + target.x * ts;
-      const py = this.camera.offsetY + target.y * ts;
-
-      ctx.save();
-      ctx.strokeStyle = `rgba(250, 204, 21, ${0.55 + pulse * 0.45})`;
-      ctx.lineWidth = 2.5;
-      ctx.setLineDash([5, 3]);
-      ctx.strokeRect(px + 2, py + 2, ts - 4, ts - 4);
-      ctx.restore();
-
-      if (target.label && this.camera.zoom >= 0.75) {
-        ctx.font = 'bold 10px system-ui, sans-serif';
-        const tw = ctx.measureText(target.label).width;
-        const bx = px + ts * 0.5 - (tw + 8) * 0.5;
-        const by = py - 16;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
-        ctx.fillRect(bx, by, tw + 8, 14);
-        ctx.fillStyle = '#fde047';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(target.label, px + ts * 0.5, by + 7);
+      if (target.x < 0 || target.x >= state.width || target.y < 0 || target.y >= state.height) {
+        continue;
       }
+      this.drawTileDiamondOutline(
+        ctx,
+        state,
+        target.x,
+        target.y,
+        halfW,
+        halfH,
+        `rgba(250, 204, 21, ${0.65 + pulse * 0.35})`,
+        2.4,
+        `rgba(250, 204, 21, ${0.12 + pulse * 0.12})`
+      );
     }
   }
 
-  private drawRoadTile(
+  private drawTutorialFloatingLabels(
     ctx: CanvasRenderingContext2D,
     state: GameState,
-    x: number,
-    y: number,
-    px: number,
-    py: number,
-    ts: number
+    halfW: number,
+    halfH: number
   ): void {
-    const cx = px + ts * 0.5;
-    const cy = py + ts * 0.5;
-    const roadW = ts * 0.34;
+    if (!state.tutorialActive || this.camera.zoom < 0.7) return;
+    const step = TUTORIAL_STEPS[state.tutorialStepIndex];
+    if (!step) return;
+    const targets = getDynamicTutorialTargets(state, step);
+    if (targets.length === 0) return;
 
-    ctx.fillStyle = '#8d6e63';
-    ctx.strokeStyle = '#5d4037';
-    ctx.lineWidth = roadW;
-    ctx.lineCap = 'round';
+    const bob = Math.sin(this.animTime * 3.5) * 3;
+    for (const target of targets) {
+      if (!target.label) continue;
+      const tile = getTile(state, target.x, target.y);
+      if (!tile) continue;
+      const wTop = getTerrainSurfaceW(tile.terrain, tile.elevation);
+      const { cx, cy } = this.tileCenterToScreen(target.x, target.y);
+      const surfaceCy = cy - wTop * (2 * halfH);
 
-    const dirs = [
-      { dx: 0, dy: -1 },
-      { dx: 1, dy: 0 },
-      { dx: 0, dy: 1 },
-      { dx: -1, dy: 0 }
-    ];
-
-    let hasConnection = false;
-    ctx.beginPath();
-    for (const d of dirs) {
-      const nb = getTile(state, x + d.dx, y + d.dy);
-      if (nb && nb.buildingId) {
-        hasConnection = true;
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(cx + d.dx * (ts * 0.5), cy + d.dy * (ts * 0.5));
-      }
-    }
-    if (hasConnection) {
-      ctx.stroke();
-      ctx.strokeStyle = '#a1887f';
-      ctx.lineWidth = roadW * 0.65;
-      ctx.stroke();
-    } else {
-      ctx.fillStyle = '#a1887f';
-      ctx.beginPath();
-      ctx.arc(cx, cy, roadW * 0.45, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.save();
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      const tw = ctx.measureText(target.label).width;
+      const bx = cx - (tw + 10) * 0.5;
+      const by = surfaceCy - halfH * 1.45 + bob;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+      ctx.fillRect(bx, by, tw + 10, 15);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx, by, tw + 10, 15);
+      ctx.fillStyle = '#fde047';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(target.label, cx, by + 7.5);
+      ctx.restore();
     }
   }
 
   private drawServiceRadiusOverlay(
     ctx: CanvasRenderingContext2D,
     state: GameState,
-    ts: number
+    halfW: number,
+    halfH: number
   ): void {
     let centerTile: { x: number; y: number } | null = null;
     let radius = 0;
-    let color = 'rgba(56, 189, 248, 0.18)';
-    let stroke = 'rgba(56, 189, 248, 0.7)';
+    let color = 'rgba(56, 189, 248, 0.14)';
+    let stroke = 'rgba(56, 189, 248, 0.78)';
 
     if (this.tool.mode === 'build' && this.hoveredTile) {
       const def = BUILDINGS[this.tool.defId];
@@ -992,11 +811,11 @@ export class CanvasRenderer {
           centerTile = this.selectedTile;
           radius = def.serviceRadius;
           if (def.serviceType === 'sanitation') {
-            color = 'rgba(45, 212, 191, 0.16)';
-            stroke = 'rgba(45, 212, 191, 0.75)';
+            color = 'rgba(45, 212, 191, 0.14)';
+            stroke = 'rgba(45, 212, 191, 0.78)';
           } else if (def.serviceType === 'knowledge') {
-            color = 'rgba(168, 85, 247, 0.16)';
-            stroke = 'rgba(168, 85, 247, 0.75)';
+            color = 'rgba(168, 85, 247, 0.14)';
+            stroke = 'rgba(168, 85, 247, 0.78)';
           }
         }
       }
@@ -1004,31 +823,208 @@ export class CanvasRenderer {
 
     if (!centerTile || radius <= 0) return;
 
-    const cx = this.camera.offsetX + (centerTile.x + 0.5) * ts;
-    const cy = this.camera.offsetY + (centerTile.y + 0.5) * ts;
-    const rPx = radius * ts;
+    const { cx, cy } = this.tileCenterToScreen(centerTile.x, centerTile.y);
+    const rx = radius * Math.SQRT2 * halfW;
+    const ry = radius * Math.SQRT2 * halfH;
 
     ctx.save();
     ctx.fillStyle = color;
     ctx.strokeStyle = stroke;
     ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
+    ctx.setLineDash([7, 4]);
     ctx.beginPath();
-    ctx.arc(cx, cy, rPx, 0, Math.PI * 2);
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
   }
 
+  private drawHoverGroundHighlight(
+    ctx: CanvasRenderingContext2D,
+    state: GameState,
+    x: number,
+    y: number,
+    halfW: number,
+    halfH: number
+  ): void {
+    if (this.tool.mode === 'select') {
+      this.drawTileDiamondOutline(
+        ctx,
+        state,
+        x,
+        y,
+        halfW,
+        halfH,
+        'rgba(255, 255, 255, 0.65)',
+        1.8,
+        'rgba(255, 255, 255, 0.08)'
+      );
+      return;
+    }
+
+    if (this.tool.mode === 'demolish') {
+      const tile = getTile(state, x, y);
+      const hasBld = Boolean(tile?.buildingId);
+      this.drawTileDiamondOutline(
+        ctx,
+        state,
+        x,
+        y,
+        halfW,
+        halfH,
+        '#ef4444',
+        2.2,
+        hasBld ? 'rgba(239, 68, 68, 0.36)' : 'rgba(148, 163, 184, 0.2)'
+      );
+      return;
+    }
+
+    if (this.tool.mode === 'build') {
+      const def = BUILDINGS[this.tool.defId];
+      if (!def) return;
+      const check = canPlaceBuilding(state, def.id, x, y);
+      this.drawTileDiamondOutline(
+        ctx,
+        state,
+        x,
+        y,
+        halfW,
+        halfH,
+        check.valid ? '#4ade80' : '#f87171',
+        2.2,
+        check.valid ? 'rgba(34, 197, 94, 0.28)' : 'rgba(239, 68, 68, 0.34)'
+      );
+    }
+  }
+
+  private drawBuildGhost3D(
+    ctx: CanvasRenderingContext2D,
+    state: GameState,
+    x: number,
+    y: number,
+    cx: number,
+    cy: number,
+    halfW: number,
+    halfH: number,
+    wTop: number
+  ): void {
+    if (this.tool.mode !== 'build') return;
+    const def = BUILDINGS[this.tool.defId];
+    if (!def) return;
+
+    ctx.save();
+    ctx.globalAlpha = 0.72;
+    if (def.isRoad) {
+      drawIsoRoadTile(ctx, state, x, y, cx, cy, halfW, halfH);
+    } else {
+      const pt = createLocalProjector(cx, cy, halfW, halfH, wTop);
+      const ghostBld: PlacedBuilding = {
+        id: '__ghost__',
+        defId: def.id,
+        x,
+        y,
+        activeRecipeId: def.recipes?.[0]?.id ?? '',
+        progressSeconds: 0,
+        constructionProgressSeconds: 0,
+        buildTimeSeconds: 1,
+        isConstructed: true,
+        residents: 0,
+        paused: false,
+        connectedToLogistics: true,
+        servicesAvailable: {
+          logistics: true,
+          market: true,
+          sanitation: true,
+          knowledge: true
+        },
+        status: 'working',
+        efficiency: 1
+      };
+      drawIsoBuildingModel(ctx, ghostBld, pt, halfW, halfH, this.animTime, false);
+    }
+    ctx.restore();
+  }
+
+  private drawSelectionAndHoverBadges(
+    ctx: CanvasRenderingContext2D,
+    state: GameState,
+    halfW: number,
+    halfH: number
+  ): void {
+    if (this.selectedTile) {
+      const { x, y } = this.selectedTile;
+      const selTile = getTile(state, x, y);
+      if (
+        selTile &&
+        !selTile.buildingId &&
+        (selTile.terrain === 'stone_deposit' || selTile.terrain === 'iron_deposit')
+      ) {
+        this.drawTerrainLabelBadge(ctx, state, x, y, selTile.terrain, halfW, halfH);
+      }
+    }
+
+    if (!this.hoveredTile) return;
+    const { x, y } = this.hoveredTile;
+    if (x < 0 || x >= state.width || y < 0 || y >= state.height) return;
+
+    if (this.tool.mode === 'select') {
+      const tile = getTile(state, x, y);
+      if (
+        tile &&
+        !tile.buildingId &&
+        (tile.terrain === 'stone_deposit' || tile.terrain === 'iron_deposit')
+      ) {
+        this.drawTerrainLabelBadge(ctx, state, x, y, tile.terrain, halfW, halfH);
+      }
+      return;
+    }
+
+    if (this.tool.mode === 'build') {
+      const def = BUILDINGS[this.tool.defId];
+      if (!def) return;
+      const check = canPlaceBuilding(state, def.id, x, y);
+      if (!check.valid && check.reason) {
+        const tile = state.tiles[y][x];
+        const wTop = getTerrainSurfaceW(tile.terrain, tile.elevation);
+        const { cx, cy } = this.tileCenterToScreen(x, y);
+        const surfaceCy = cy - wTop * (2 * halfH);
+
+        ctx.save();
+        ctx.font = '600 11px system-ui, sans-serif';
+        const textWidth = ctx.measureText(check.reason).width;
+        const boxW = textWidth + 14;
+        const boxX = cx - boxW * 0.5;
+        const boxY = surfaceCy - halfH * 1.5;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx.fillRect(boxX, boxY, boxW, 20);
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxX, boxY, boxW, 20);
+        ctx.fillStyle = '#fca5a5';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(check.reason, cx, boxY + 10);
+        ctx.restore();
+      }
+    }
+  }
+
   private drawTerrainLabelBadge(
     ctx: CanvasRenderingContext2D,
+    state: GameState,
+    x: number,
+    y: number,
     terrain: string,
-    px: number,
-    py: number,
-    ts: number
+    halfW: number,
+    halfH: number
   ): void {
     const tDef = TERRAINS[terrain as keyof typeof TERRAINS];
     if (!tDef) return;
+    const tile = state.tiles[y][x];
+    const wTop = getTerrainSurfaceW(tile.terrain, tile.elevation);
+    const { cx, cy } = this.tileCenterToScreen(x, y);
+    const surfaceCy = cy - wTop * (2 * halfH);
+
     const icon =
       terrain === 'stone_deposit'
         ? '🪨'
@@ -1039,14 +1035,16 @@ export class CanvasRenderer {
             : terrain === 'forest'
               ? '🌲'
               : '🐟';
-    const label = tDef.resourceHint ? `${icon} ${tDef.name} (${tDef.resourceHint})` : `${icon} ${tDef.name}`;
+    const label = tDef.resourceHint
+      ? `${icon} ${tDef.name} (${tDef.resourceHint})`
+      : `${icon} ${tDef.name}`;
 
     ctx.save();
     ctx.font = '600 11px system-ui, sans-serif';
     const textWidth = ctx.measureText(label).width;
     const boxW = textWidth + 14;
-    const boxX = px + ts * 0.5 - boxW * 0.5;
-    const boxY = py - 24;
+    const boxX = cx - boxW * 0.5;
+    const boxY = surfaceCy - halfH * 1.65;
     ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
     ctx.fillRect(boxX, boxY, boxW, 20);
     ctx.strokeStyle = '#fbbf24';
@@ -1055,78 +1053,8 @@ export class CanvasRenderer {
     ctx.fillStyle = '#fef3c7';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, px + ts * 0.5, boxY + 10);
+    ctx.fillText(label, cx, boxY + 10);
     ctx.restore();
   }
-
-  private drawHoverAndPlacementGhost(
-    ctx: CanvasRenderingContext2D,
-    state: GameState,
-    x: number,
-    y: number,
-    px: number,
-    py: number,
-    ts: number
-  ): void {
-    if (this.tool.mode === 'select') {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(px + 1, py + 1, ts - 2, ts - 2);
-
-      const tile = getTile(state, x, y);
-      if (
-        tile &&
-        !tile.buildingId &&
-        (tile.terrain === 'stone_deposit' || tile.terrain === 'iron_deposit')
-      ) {
-        this.drawTerrainLabelBadge(ctx, tile.terrain, px, py, ts);
-      }
-      return;
-    }
-
-    if (this.tool.mode === 'demolish') {
-      const tile = getTile(state, x, y);
-      const hasBld = Boolean(tile?.buildingId);
-      ctx.fillStyle = hasBld ? 'rgba(239, 68, 68, 0.38)' : 'rgba(148, 163, 184, 0.2)';
-      ctx.fillRect(px, py, ts, ts);
-      ctx.strokeStyle = '#ef4444';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(px + 1, py + 1, ts - 2, ts - 2);
-      return;
-    }
-
-    if (this.tool.mode === 'build') {
-      const def = BUILDINGS[this.tool.defId];
-      if (!def) return;
-      const check = canPlaceBuilding(state, def.id, x, y);
-
-      ctx.fillStyle = check.valid ? 'rgba(34, 197, 94, 0.34)' : 'rgba(239, 68, 68, 0.38)';
-      ctx.fillRect(px, py, ts, ts);
-
-      ctx.strokeStyle = check.valid ? '#4ade80' : '#f87171';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(px + 1, py + 1, ts - 2, ts - 2);
-
-      ctx.font = `${Math.floor(ts * 0.42)}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-      ctx.fillText(def.icon, px + ts * 0.5, py + ts * 0.5);
-
-      if (!check.valid && check.reason) {
-        ctx.font = '600 11px system-ui, sans-serif';
-        const textWidth = ctx.measureText(check.reason).width;
-        const boxW = textWidth + 14;
-        const boxX = px + ts * 0.5 - boxW * 0.5;
-        const boxY = py - 24;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-        ctx.fillRect(boxX, boxY, boxW, 20);
-        ctx.strokeStyle = '#ef4444';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(boxX, boxY, boxW, 20);
-        ctx.fillStyle = '#fca5a5';
-        ctx.fillText(check.reason, px + ts * 0.5, boxY + 10);
-      }
-    }
-  }
 }
+
