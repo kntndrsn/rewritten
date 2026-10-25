@@ -6,6 +6,7 @@ import {
   canPlaceBuilding,
   canUnlockTech,
   canUpgradeHouse,
+  checkAndTriggerHistoricalEvents,
   createInitialGameState,
   demolishTile,
   placeBuilding,
@@ -15,6 +16,7 @@ import {
   unlockTech,
   upgradeHouse
 } from '../src/core/simulation.ts';
+import { TUTORIAL_STEPS } from '../src/data/tutorial.ts';
 
 describe('Rewritten Core Simulation Engine', () => {
   it('initializes minimal landfall settlement with paced calendar and sealed trunks', () => {
@@ -205,6 +207,57 @@ describe('Rewritten Core Simulation Engine', () => {
     const demRes = demolishTile(state, 7, 7);
     assert.equal(demRes.success, true);
     assert.equal(state.resources.wood, woodAfterPlace + 5);
+  });
+
+  it('validates all highlighted tutorial Lumberjack target tiles are buildable', () => {
+    const state = createInitialGameState(1607, true);
+    const lumberjackStep = TUTORIAL_STEPS.find((s) => s.id === 'build_lumberjack');
+    assert.ok(lumberjackStep?.highlightTiles && lumberjackStep.highlightTiles.length > 0);
+    for (const tile of lumberjackStep.highlightTiles) {
+      const check = canPlaceBuilding(state, 'lumberjack_hut', tile.x, tile.y);
+      assert.equal(
+        check.valid,
+        true,
+        `Expected tutorial highlight (${tile.x}, ${tile.y}) to be valid for lumberjack_hut: ${check.reason}`
+      );
+    }
+  });
+
+  it('defers historical events when no choice is affordable and waives Insight when requiredTechId is unlocked', () => {
+    const state = createInitialGameState(1607, true);
+    skipTutorial(state);
+    state.completedEventIds.push('starving_winter_1609');
+    state.day = 18;
+    state.totalPopulation = 24;
+    state.resources.tools = 0; // indigenous_envoy_1611 requires 4 or 6 tools
+
+    checkAndTriggerHistoricalEvents(state);
+    assert.equal(
+      state.activeEventId,
+      null,
+      'Should defer indigenous_envoy_1611 when player has 0 tools'
+    );
+
+    state.resources.tools = 4;
+    checkAndTriggerHistoricalEvents(state);
+    assert.equal(state.activeEventId, 'indigenous_envoy_1611');
+    resolveHistoricalEvent(state, 'indigenous_envoy_1611', 'guarded_barter');
+
+    // Test Germ Theory waiving 18 Insight on marsh_fever_outbreak
+    state.unlockedTechIds.push('germ_theory');
+    state.resources.insight = 0;
+    state.resources.stone = 8;
+    const feverRes = resolveHistoricalEvent(
+      state,
+      'marsh_fever_outbreak',
+      'chlorinated_sand_filtration'
+    );
+    assert.equal(
+      feverRes.success,
+      true,
+      'Unlocked germ_theory should waive the 18 Insight cost for chlorinated_sand_filtration'
+    );
+    assert.equal(state.resources.stone, 0);
   });
 });
 

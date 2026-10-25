@@ -58,12 +58,12 @@ export const TUTORIAL_STEPS: TutorialStepDefinition[] = [
     narrative:
       'Every structure on the colonial frontier requires wood. East of our landing stands dense Old-Growth Timberland. We must set up a Lumberjack Camp on the forest edge.',
     objectiveText:
-      'Select "Lumberjack Camp" (🪓 Gathering) and place it on or adjacent to Forest—such as tile (10, 7) or (11, 7).',
+      'Select "Lumberjack Camp" (🪓 Gathering) and place it on or adjacent to Forest—such as tile (11, 7) or (12, 7).',
     recommendedBuildDefId: 'lumberjack_hut',
     recommendedCategory: 'gathering',
     highlightTiles: [
-      { x: 10, y: 7, label: 'Build Lumberjack' },
-      { x: 11, y: 7, label: 'Forest Edge' }
+      { x: 11, y: 7, label: 'Build Lumberjack' },
+      { x: 12, y: 7, label: 'Forest Stand' }
     ]
   },
   {

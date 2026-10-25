@@ -101,6 +101,7 @@ export const HISTORICAL_EVENTS: HistoricalEventDefinition[] = [
         id: 'chlorinated_sand_filtration',
         label: 'Construct Charcoal-Sand Water Filters & Enforce Boiling (Requires Germ Theory or 18 Insight)',
         isAnachronistic: true,
+        requiredTechId: 'germ_theory',
         cost: { insight: 18, stone: 8 },
         outcomeText: 'You seal contaminated shallow wells, install layered sand-and-charcoal filters, and mandate boiled water. The fever vanishes in 48 hours!',
         effects: {

@@ -8,13 +8,16 @@ import { INTRO_STORY, TUTORIAL_STEPS } from '../data/tutorial.ts';
 import type { BuildingCategory, ResourceId } from '../data/types.ts';
 import {
   type GameState,
+  type PlacedBuilding,
   WIN_CONDITIONS,
   advanceTutorialManually,
+  canAffordEventChoice,
   canPlaceBuilding,
   canUnlockTech,
   canUpgradeHouse,
   demolishTile,
   getColonialYearString,
+  getEffectiveEventChoiceCost,
   getTile,
   hasEnoughResources,
   placeBuilding,
@@ -39,6 +42,7 @@ export class GameUI {
   private lastRenderedEventId: string | null = null;
   private lastTutorialStepIndex = -1;
   private lastTutorialActive = false;
+  private renderedInspectorKey = '';
   private toastTimeout: number | null = null;
 
   constructor(state: GameState, renderer: CanvasRenderer, onResetGame: () => void) {
@@ -48,7 +52,7 @@ export class GameUI {
 
     this.bindStaticControls();
     this.renderBuildToolbar();
-    this.renderInspector();
+    this.renderInspector(true);
     this.renderTutorialPanel();
     if (!this.state.introSeen) {
       this.state.speed = 0;
@@ -61,8 +65,9 @@ export class GameUI {
     this.state = newState;
     this.lastRenderedEventId = null;
     this.lastTutorialStepIndex = -1;
+    this.renderedInspectorKey = '';
     this.renderBuildToolbar();
-    this.renderInspector();
+    this.renderInspector(true);
     this.renderTutorialPanel();
     if (!this.state.introSeen) {
       this.state.speed = 0;
@@ -208,7 +213,21 @@ export class GameUI {
 
     // Keyboard shortcuts (Escape cancels build/demolish or closes modal, Space toggles pause)
     window.addEventListener('keydown', (e) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (
+        e.target instanceof HTMLElement &&
+        e.target.closest('button, a, [role="button"], input, select, textarea')
+      ) {
+        if (e.key === 'Escape') {
+          if (this.activeModal) {
+            this.openModal(null);
+          } else if (this.renderer.tool.mode !== 'select') {
+            this.renderer.tool = { mode: 'select' };
+            this.updateToolButtons();
+            this.renderBuildToolbar();
+          }
+        }
+        return;
+      }
       if (e.key === 'Escape') {
         if (this.activeModal) {
           this.openModal(null);
@@ -337,6 +356,10 @@ export class GameUI {
       this.renderTutorialPanel();
     }
 
+    if (this.activeModal === 'tech') {
+      this.updateTechModalLiveState();
+    }
+
     this.renderSettlementOverviewCard();
   }
 
@@ -422,24 +445,42 @@ export class GameUI {
     });
   }
 
-  public renderInspector(): void {
+  public renderInspector(forceRebuild = false): void {
     const panel = document.getElementById('inspector-content');
     if (!panel) return;
 
     const sel = this.renderer.selectedTile;
     if (!sel) {
-      panel.innerHTML = `<p class="muted-hint">Select any tile or building on the map to inspect its status, switch recipes, or upgrade housing.</p>`;
+      const emptyKey = 'none';
+      if (this.renderedInspectorKey !== emptyKey || forceRebuild) {
+        this.renderedInspectorKey = emptyKey;
+        panel.innerHTML = `<p class="muted-hint">Select any tile or building on the map to inspect its status, switch recipes, or upgrade housing.</p>`;
+      }
       return;
     }
 
     const tile = getTile(this.state, sel.x, sel.y);
     if (!tile) {
-      panel.innerHTML = `<p class="muted-hint">Tile out of bounds.</p>`;
+      const oobKey = 'oob';
+      if (this.renderedInspectorKey !== oobKey || forceRebuild) {
+        this.renderedInspectorKey = oobKey;
+        panel.innerHTML = `<p class="muted-hint">Tile out of bounds.</p>`;
+      }
       return;
     }
 
     const tDef = TERRAINS[tile.terrain];
     const bld = tile.buildingId ? this.state.buildings[tile.buildingId] : undefined;
+    const nextKey = `${sel.x},${sel.y}:${bld?.id ?? 'empty'}:${bld?.defId ?? ''}:${this.state.unlockedTechIds.join(',')}`;
+
+    if (!forceRebuild && this.renderedInspectorKey === nextKey) {
+      if (bld) {
+        this.updateInspectorLiveValues(bld);
+      }
+      return;
+    }
+
+    this.renderedInspectorKey = nextKey;
 
     if (!bld) {
       panel.innerHTML = `
@@ -459,16 +500,7 @@ export class GameUI {
     }
 
     const def = BUILDINGS[bld.defId];
-    const statusMap: Record<string, { label: string; cls: string }> = {
-      working: { label: '⚡ Operating Normally', cls: 'status-ok' },
-      no_road: { label: '⚠️ Disconnected from Road/Warehouse', cls: 'status-err' },
-      missing_inputs: { label: '⏳ Waiting for Input Materials', cls: 'status-warn' },
-      storage_full: { label: '📦 Warehouse Storage Full', cls: 'status-warn' },
-      paused: { label: '⏸ Production Paused', cls: 'status-warn' },
-      housing: { label: '🏡 Occupied Residence', cls: 'status-ok' },
-      civic: { label: '🏛️ Active Civic Infrastructure', cls: 'status-ok' }
-    };
-    const stInfo = statusMap[bld.status] ?? { label: bld.status, cls: '' };
+    const stInfo = this.getStatusDisplay(bld.status);
 
     // Housing Inspector Block
     let housingHtml = '';
@@ -490,7 +522,7 @@ export class GameUI {
           return `
             <div class="need-row">
               <span>${need.label}</span>
-              <span class="${satisfied ? 'need-ok' : 'need-miss'}">${satisfied ? '✓ Supplied' : '✗ Missing'}</span>
+              <span data-need-id="${need.id}" class="${satisfied ? 'need-ok' : 'need-miss'}">${satisfied ? '✓ Supplied' : '✗ Missing'}</span>
             </div>
           `;
         })
@@ -507,7 +539,7 @@ export class GameUI {
         <div class="inspector-box">
           <div class="box-row">
             <span>Residents (${tierDef.badge} ${tierDef.name}):</span>
-            <strong>${Math.floor(bld.residents)} / ${def.housing.capacity}</strong>
+            <strong id="insp-residents-val">${Math.floor(bld.residents)} / ${def.housing.capacity}</strong>
           </div>
           <div class="needs-list">
             <h5>Household Needs</h5>
@@ -517,10 +549,10 @@ export class GameUI {
             nextDef
               ? `
             <div class="upgrade-box">
-              <button id="btn-upgrade-house" class="btn-primary ${upgCheck.valid ? '' : 'btn-disabled'}" ${upgCheck.valid ? '' : 'disabled'}>
+              <button id="btn-upgrade-house" type="button" class="btn-primary ${upgCheck.valid ? '' : 'btn-disabled'}" ${upgCheck.valid ? '' : 'disabled'}>
                 ▲ Upgrade to ${nextDef.name} (${upgradeCostHtml})
               </button>
-              ${!upgCheck.valid && upgCheck.reason ? `<small class="upg-reason">${upgCheck.reason}</small>` : ''}
+              <small id="insp-upgrade-reason" class="upg-reason">${!upgCheck.valid && upgCheck.reason ? upgCheck.reason : ''}</small>
             </div>
           `
               : `<div class="hint-chip">🌟 Maximum Residence Tier Reached</div>`
@@ -549,7 +581,7 @@ export class GameUI {
             .join(' + ');
 
           return `
-            <div class="recipe-option ${isSelected ? 'active' : ''} ${unlocked ? '' : 'locked'}" data-recipe-id="${r.id}">
+            <button type="button" class="recipe-option ${isSelected ? 'active' : ''} ${unlocked ? '' : 'locked'}" data-recipe-id="${r.id}" aria-pressed="${isSelected}">
               <div class="recipe-head">
                 <strong>${r.name}</strong>
                 ${r.isAnachronistic ? '<span class="anach-tag">⏳ Future Method</span>' : ''}
@@ -561,7 +593,7 @@ export class GameUI {
                   ? `<div class="recipe-lock-note">🔒 Requires ${TECHNOLOGIES[r.requiredTechId!]?.name}</div>`
                   : ''
               }
-            </div>
+            </button>
           `;
         })
         .join('');
@@ -570,10 +602,10 @@ export class GameUI {
         <div class="inspector-box">
           <div class="box-row">
             <span>Efficiency:</span>
-            <strong>${Math.round(bld.efficiency * 100)}%</strong>
+            <strong id="insp-efficiency-val">${Math.round(bld.efficiency * 100)}%</strong>
           </div>
           <div class="progress-bar-outer">
-            <div class="progress-bar-inner" style="width: ${pct}%"></div>
+            <div id="insp-progress-bar" class="progress-bar-inner" style="width: ${pct}%"></div>
           </div>
           <h5>Production Method (Click to Switch)</h5>
           <div class="recipe-list">${recipeCards}</div>
@@ -590,7 +622,7 @@ export class GameUI {
             <span class="coords-tag">Tile (${bld.x}, ${bld.y}) • ${tDef.name}</span>
           </div>
         </div>
-        <div class="status-pill ${stInfo.cls}">${stInfo.label}</div>
+        <div id="insp-status-pill" class="status-pill ${stInfo.cls}">${stInfo.label}</div>
         <p class="inspector-desc">${def.description}</p>
         <div class="meta-grid">
           <div><span>Workforce:</span> <strong>${def.workersRequired}</strong></div>
@@ -603,12 +635,12 @@ export class GameUI {
         <div class="inspector-actions">
           ${
             def.recipes && def.recipes.length > 0
-              ? `<button id="btn-toggle-pause" class="btn-secondary">${bld.paused ? '▶ Resume Work' : '⏸ Pause Work'}</button>`
+              ? `<button id="btn-toggle-pause" type="button" class="btn-secondary">${bld.paused ? '▶ Resume Work' : '⏸ Pause Work'}</button>`
               : ''
           }
           ${
             bld.defId !== 'founding_camp'
-              ? `<button id="btn-demolish-selected" class="btn-danger">💣 Demolish</button>`
+              ? `<button id="btn-demolish-selected" type="button" class="btn-danger">💣 Demolish</button>`
               : ''
           }
         </div>
@@ -621,7 +653,7 @@ export class GameUI {
       if (res.success) {
         const updatedDef = BUILDINGS[bld.defId];
         this.showToast(`Upgraded residence to ${updatedDef.name}!`, 'success');
-        this.renderInspector();
+        this.renderInspector(true);
         this.updateHUD();
       } else if (res.reason) {
         this.showToast(res.reason, 'warn');
@@ -629,7 +661,7 @@ export class GameUI {
     });
 
     // Bind recipe switching
-    panel.querySelectorAll<HTMLElement>('[data-recipe-id]').forEach((el) => {
+    panel.querySelectorAll<HTMLButtonElement>('[data-recipe-id]').forEach((el) => {
       el.addEventListener('click', () => {
         const rId = el.dataset.recipeId!;
         const recipe = def.recipes?.find((r) => r.id === rId);
@@ -643,7 +675,7 @@ export class GameUI {
         }
         if (setBuildingRecipe(this.state, bld.id, rId)) {
           this.showToast(`Switched production to ${recipe?.name}.`, 'success');
-          this.renderInspector();
+          this.updateInspectorLiveValues(bld);
         }
       });
     });
@@ -651,7 +683,7 @@ export class GameUI {
     // Bind pause button
     document.getElementById('btn-toggle-pause')?.addEventListener('click', () => {
       toggleBuildingPaused(this.state, bld.id);
-      this.renderInspector();
+      this.updateInspectorLiveValues(bld);
       this.updateHUD();
     });
 
@@ -660,12 +692,97 @@ export class GameUI {
       const res = demolishTile(this.state, bld.x, bld.y);
       if (res.success) {
         this.showToast('Structure dismantled (50% materials refunded).', 'info');
-        this.renderInspector();
+        this.renderInspector(true);
         this.updateHUD();
       } else if (res.reason) {
         this.showToast(res.reason, 'warn');
       }
     });
+  }
+
+  private getStatusDisplay(status: string): { label: string; cls: string } {
+    const statusMap: Record<string, { label: string; cls: string }> = {
+      working: { label: '⚡ Operating Normally', cls: 'status-ok' },
+      no_road: { label: '⚠️ Disconnected from Road/Warehouse', cls: 'status-err' },
+      missing_inputs: { label: '⏳ Waiting for Input Materials', cls: 'status-warn' },
+      storage_full: { label: '📦 Warehouse Storage Full', cls: 'status-warn' },
+      paused: { label: '⏸ Production Paused', cls: 'status-warn' },
+      housing: { label: '🏡 Occupied Residence', cls: 'status-ok' },
+      civic: { label: '🏛️ Active Civic Infrastructure', cls: 'status-ok' }
+    };
+    return statusMap[status] ?? { label: status, cls: '' };
+  }
+
+  private updateInspectorLiveValues(bld: PlacedBuilding): void {
+    const def = BUILDINGS[bld.defId];
+    if (!def) return;
+
+    const statusPill = document.getElementById('insp-status-pill');
+    if (statusPill) {
+      const stInfo = this.getStatusDisplay(bld.status);
+      statusPill.className = `status-pill ${stInfo.cls}`;
+      statusPill.textContent = stInfo.label;
+    }
+
+    if (def.housing) {
+      const resVal = document.getElementById('insp-residents-val');
+      if (resVal) {
+        resVal.textContent = `${Math.floor(bld.residents)} / ${def.housing.capacity}`;
+      }
+
+      const tierDef = POPULATION_TIERS[def.housing.tier];
+      for (const need of tierDef.needs) {
+        const needEl = document.querySelector<HTMLElement>(`[data-need-id="${need.id}"]`);
+        if (needEl) {
+          const satisfied = need.service
+            ? bld.servicesAvailable[need.service]
+            : (this.state.needSatisfaction[need.id] ?? 0) >= 0.7;
+          needEl.className = satisfied ? 'need-ok' : 'need-miss';
+          needEl.textContent = satisfied ? '✓ Supplied' : '✗ Missing';
+        }
+      }
+
+      const upgBtn = document.getElementById('btn-upgrade-house') as HTMLButtonElement | null;
+      const upgReason = document.getElementById('insp-upgrade-reason');
+      if (upgBtn) {
+        const upgCheck = canUpgradeHouse(this.state, bld.id);
+        upgBtn.disabled = !upgCheck.valid;
+        upgBtn.classList.toggle('btn-disabled', !upgCheck.valid);
+        if (upgReason) {
+          upgReason.textContent = !upgCheck.valid && upgCheck.reason ? upgCheck.reason : '';
+        }
+      }
+    }
+
+    if (def.recipes && def.recipes.length > 0) {
+      const activeRecipe =
+        def.recipes.find((r) => r.id === bld.activeRecipeId) ?? def.recipes[0];
+      const pct = Math.min(
+        100,
+        Math.round((bld.progressSeconds / activeRecipe.cycleSeconds) * 100)
+      );
+
+      const effVal = document.getElementById('insp-efficiency-val');
+      if (effVal) {
+        effVal.textContent = `${Math.round(bld.efficiency * 100)}%`;
+      }
+
+      const progBar = document.getElementById('insp-progress-bar');
+      if (progBar) {
+        progBar.style.width = `${pct}%`;
+      }
+
+      document.querySelectorAll<HTMLButtonElement>('[data-recipe-id]').forEach((btn) => {
+        const isSelected = btn.dataset.recipeId === activeRecipe.id;
+        btn.classList.toggle('active', isSelected);
+        btn.setAttribute('aria-pressed', String(isSelected));
+      });
+
+      const pauseBtn = document.getElementById('btn-toggle-pause');
+      if (pauseBtn) {
+        pauseBtn.textContent = bld.paused ? '▶ Resume Work' : '⏸ Pause Work';
+      }
+    }
   }
 
   private renderSettlementOverviewCard(): void {
@@ -728,7 +845,7 @@ export class GameUI {
         .join(', ');
 
       return `
-        <div class="tech-card ${unlocked ? 'tech-unlocked' : check.valid ? 'tech-available' : 'tech-locked'}">
+        <div class="tech-card ${unlocked ? 'tech-unlocked' : check.valid ? 'tech-available' : 'tech-locked'}" data-tech-card-id="${tech.id}">
           <div class="tech-card-header">
             <span class="tech-icon">${tech.icon}</span>
             <div>
@@ -773,13 +890,38 @@ export class GameUI {
           );
           this.renderTechModal();
           this.renderBuildToolbar();
-          this.renderInspector();
+          this.renderInspector(true);
           this.updateHUD();
         } else if (res.reason) {
           this.showToast(res.reason, 'warn');
         }
       });
     });
+  }
+
+  private updateTechModalLiveState(): void {
+    const container = document.getElementById('tech-grid-container');
+    if (!container) return;
+
+    for (const tech of TECHNOLOGY_LIST) {
+      if (this.state.unlockedTechIds.includes(tech.id)) continue;
+      const check = canUnlockTech(this.state, tech.id);
+
+      const card = container.querySelector<HTMLElement>(`[data-tech-card-id="${tech.id}"]`);
+      if (card) {
+        card.classList.toggle('tech-available', check.valid);
+        card.classList.toggle('tech-locked', !check.valid);
+      }
+
+      const btn = container.querySelector<HTMLButtonElement>(`[data-tech-id="${tech.id}"]`);
+      if (btn) {
+        btn.disabled = !check.valid;
+        btn.classList.toggle('btn-disabled', !check.valid);
+        btn.textContent = check.valid
+          ? `Unlock with ${tech.insightCost} Insight`
+          : (check.reason ?? 'Unavailable');
+      }
+    }
   }
 
   public renderChronicleModal(): void {
@@ -822,12 +964,21 @@ export class GameUI {
 
     const choicesHtml = evt.choices
       .map((c) => {
-        const canAfford = hasEnoughResources(this.state, c.cost).ok;
-        const costText = c.cost
-          ? Object.entries(c.cost)
-              .map(([k, v]) => `${RESOURCES[k as ResourceId].icon} ${v} ${RESOURCES[k as ResourceId].shortName}`)
-              .join(', ')
-          : 'Free';
+        const canAfford = canAffordEventChoice(this.state, c).ok;
+        const effectiveCost = getEffectiveEventChoiceCost(this.state, c);
+        const techSatisfied = Boolean(
+          c.requiredTechId && this.state.unlockedTechIds.includes(c.requiredTechId)
+        );
+        const costText = effectiveCost
+          ? Object.entries(effectiveCost)
+              .map(
+                ([k, v]) =>
+                  `${RESOURCES[k as ResourceId].icon} ${v} ${RESOURCES[k as ResourceId].shortName}`
+              )
+              .join(', ') + (techSatisfied ? ` (Insight waived via ${TECHNOLOGIES[c.requiredTechId!]?.name})` : '')
+          : techSatisfied
+            ? `Free (${TECHNOLOGIES[c.requiredTechId!]?.name} Unlocked)`
+            : 'Free';
 
         const effectBadges: string[] = [];
         if (c.effects.divergenceDelta) {

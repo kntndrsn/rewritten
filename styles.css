@@ -466,6 +466,11 @@ body {
 }
 
 .recipe-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   padding: 6px;

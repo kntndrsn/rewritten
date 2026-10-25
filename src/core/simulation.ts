@@ -6,6 +6,7 @@ import { TECHNOLOGIES } from '../data/technologies.ts';
 import { TUTORIAL_STEPS } from '../data/tutorial.ts';
 import type {
   BuildingDefinition,
+  EventChoice,
   PopulationTierId,
   RecipeDefinition,
   ResourceId,
@@ -586,6 +587,28 @@ export function unlockTech(
   return { success: true };
 }
 
+export function getEffectiveEventChoiceCost(
+  state: GameState,
+  choice: EventChoice
+): Partial<Record<ResourceId, number>> | undefined {
+  if (!choice.cost) return undefined;
+  // If the choice offers a requiredTechId alternative (e.g. "Requires Germ Theory or 18 Insight")
+  // and the player has already unlocked that technology, waive the Insight portion of the cost.
+  if (choice.requiredTechId && state.unlockedTechIds.includes(choice.requiredTechId)) {
+    const adjusted: Partial<Record<ResourceId, number>> = { ...choice.cost };
+    delete adjusted.insight;
+    return Object.keys(adjusted).length > 0 ? adjusted : undefined;
+  }
+  return choice.cost;
+}
+
+export function canAffordEventChoice(
+  state: GameState,
+  choice: EventChoice
+): { ok: boolean; missing?: ResourceId } {
+  return hasEnoughResources(state, getEffectiveEventChoiceCost(state, choice));
+}
+
 export function resolveHistoricalEvent(
   state: GameState,
   eventId: string,
@@ -597,16 +620,16 @@ export function resolveHistoricalEvent(
   const choice = eventDef.choices.find((c) => c.id === choiceId);
   if (!choice) return { success: false, reason: 'Choice not found.' };
 
-  // If the choice requires a tech OR cost, allow if tech is unlocked OR player can pay cost
-  if (choice.cost) {
-    const costCheck = hasEnoughResources(state, choice.cost);
+  const effectiveCost = getEffectiveEventChoiceCost(state, choice);
+  if (effectiveCost) {
+    const costCheck = hasEnoughResources(state, effectiveCost);
     if (!costCheck.ok && costCheck.missing) {
       return {
         success: false,
         reason: `Not enough ${RESOURCES[costCheck.missing].name} for this decision.`
       };
     }
-    payResources(state, choice.cost);
+    payResources(state, effectiveCost);
   }
 
   const eff = choice.effects;
@@ -1179,6 +1202,8 @@ export function checkAndTriggerHistoricalEvents(state: GameState): void {
     if (evt.minPopulation && state.totalPopulation < evt.minPopulation) continue;
     if (evt.minDivergence && state.divergence < evt.minDivergence) continue;
     if (evt.minParadox && state.paradox < evt.minParadox) continue;
+    // Defer event activation until at least one choice is currently affordable so play is never deadlocked
+    if (!evt.choices.some((c) => canAffordEventChoice(state, c).ok)) continue;
 
     state.activeEventId = evt.id;
     state.speed = 0; // Pause so the player can weigh their historical decision

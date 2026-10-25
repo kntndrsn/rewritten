@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
-import { readFileSync, existsSync } from 'node:fs';
-import { join, extname, dirname } from 'node:path';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { join, extname, dirname, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildProject } from './build.mjs';
 
@@ -21,27 +21,57 @@ const MIME_TYPES = {
 
 buildProject();
 
+function isContainedInDir(baseDir, targetPath) {
+  const rel = relative(baseDir, targetPath);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
 const server = createServer((req, res) => {
-  const urlPath = (req.url || '/').split('?')[0];
-  let relPath = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
-  if (relPath.startsWith('dist/')) {
+  const rawUrlPath = (req.url || '/').split('?')[0];
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(rawUrlPath);
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Bad Request');
+    return;
+  }
+
+  // Reject null bytes or explicit parent-directory traversal segments
+  if (decodedPath.includes('\0') || decodedPath.split(/[\\/]+/).includes('..')) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Forbidden');
+    return;
+  }
+
+  let relPath = decodedPath === '/' ? 'index.html' : decodedPath.replace(/^[/\\]+/, '');
+  if (relPath.startsWith('dist/') || relPath.startsWith('dist\\')) {
     relPath = relPath.slice('dist/'.length);
   }
 
-  const candidatePaths = [
-    join(distDir, relPath),
-    join(rootDir, relPath)
-  ];
+  const candidateBases = [distDir, rootDir];
 
-  for (const filePath of candidatePaths) {
-    if (existsSync(filePath)) {
+  for (const baseDir of candidateBases) {
+    const filePath = resolve(baseDir, relPath);
+    if (!isContainedInDir(baseDir, filePath)) {
+      continue;
+    }
+
+    try {
+      if (!existsSync(filePath)) continue;
+      const stat = statSync(filePath);
+      if (!stat.isFile()) continue;
+
+      const body = readFileSync(filePath);
       const ext = extname(filePath);
       res.writeHead(200, {
         'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
         'Cache-Control': 'no-store'
       });
-      res.end(readFileSync(filePath));
+      res.end(body);
       return;
+    } catch {
+      continue;
     }
   }
 

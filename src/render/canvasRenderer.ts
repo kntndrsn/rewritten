@@ -32,6 +32,9 @@ export class CanvasRenderer {
   public tool: InteractionTool = { mode: 'select' };
 
   private isPanning = false;
+  private panMoved = false;
+  private downClientX = 0;
+  private downClientY = 0;
   private panStartX = 0;
   private panStartY = 0;
   private keysPressed = new Set<string>();
@@ -95,6 +98,9 @@ export class CanvasRenderer {
     this.canvas.addEventListener('mousedown', (e) => {
       if (e.button === 1 || e.button === 2 || (e.button === 0 && e.shiftKey)) {
         this.isPanning = true;
+        this.panMoved = false;
+        this.downClientX = e.clientX;
+        this.downClientY = e.clientY;
         this.panStartX = e.clientX - this.camera.offsetX;
         this.panStartY = e.clientY - this.camera.offsetY;
         return;
@@ -109,17 +115,22 @@ export class CanvasRenderer {
     });
 
     window.addEventListener('mouseup', (e) => {
-      if (e.button === 2 && !this.isPanning) {
-        // Right-click cancels active build/demolish mode
-        if (this.onTileClickCallback && this.hoveredTile) {
-          this.onTileClickCallback(this.hoveredTile.x, this.hoveredTile.y, 2);
+      if (e.button === 2 && !this.panMoved) {
+        // Stationary right-click cancels active build/demolish mode
+        const coords = this.hoveredTile ?? this.screenToTile(e.clientX, e.clientY);
+        if (this.onTileClickCallback && coords) {
+          this.onTileClickCallback(coords.x, coords.y, 2);
         }
       }
       this.isPanning = false;
+      this.panMoved = false;
     });
 
     this.canvas.addEventListener('mousemove', (e) => {
       if (this.isPanning) {
+        if (Math.hypot(e.clientX - this.downClientX, e.clientY - this.downClientY) > 4) {
+          this.panMoved = true;
+        }
         this.camera.offsetX = e.clientX - this.panStartX;
         this.camera.offsetY = e.clientY - this.panStartY;
         return;
