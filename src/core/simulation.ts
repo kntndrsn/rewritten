@@ -3,6 +3,7 @@ import { HISTORICAL_EVENTS } from '../data/events.ts';
 import { POPULATION_TIERS, POPULATION_TIER_ORDER } from '../data/population.ts';
 import { BASE_WAREHOUSE_CAPACITY, RESOURCES, RESOURCE_ORDER } from '../data/resources.ts';
 import { TECHNOLOGIES } from '../data/technologies.ts';
+import { TUTORIAL_STEPS } from '../data/tutorial.ts';
 import type {
   BuildingDefinition,
   PopulationTierId,
@@ -79,6 +80,11 @@ export interface GameState {
   speed: 0 | 1 | 2 | 4;
   won: boolean;
   winDismissed: boolean;
+  introSeen: boolean;
+  tutorialActive: boolean;
+  tutorialStepIndex: number;
+  tutorialCompleted: boolean;
+  trunksUnsealed: boolean;
   chronicle: ChronicleEntry[];
 }
 
@@ -89,7 +95,7 @@ export const WIN_CONDITIONS = {
   maxParadox: 70
 };
 
-const SECONDS_PER_DAY = 8;
+export const SECONDS_PER_DAY = 25;
 
 export function getColonialYearString(day: number): string {
   const baseYear = 1607;
@@ -139,13 +145,18 @@ export function createInitialGameState(seed = 1607, withStarterSettlement = true
     speed: 1,
     won: false,
     winDismissed: false,
+    introSeen: false,
+    tutorialActive: true,
+    tutorialStepIndex: 0,
+    tutorialCompleted: false,
+    trunksUnsealed: false,
     chronicle: [
       {
         id: 'chronicle_arrival',
         day: 1,
         yearText: 'Spring 1607',
         title: 'Landfall at James River Point',
-        text: 'Your time-displaced expedition establishes a beachhead in colonial Virginia, carrying sealed trunks of future metallurgy, agronomy, and medical treatises.',
+        text: 'Your time-displaced expedition establishes a beachhead in colonial Virginia. Basic frontier survival—timber, fishing, and shelter—must be secured before unsealing the future archives.',
         category: 'milestone'
       }
     ]
@@ -186,26 +197,12 @@ function seedStarterSettlement(state: GameState): void {
   // Temporal Landing & Warehouse at (7, 8)
   placeFree('founding_camp', 7, 8);
 
-  // Main Colonial Cart Road spine along y = 8 from x = 6 to x = 11
-  placeFree('dirt_road', 6, 8);
+  // Short starter Colonial Cart Road stub at (8, 8) and (9, 8)
   placeFree('dirt_road', 8, 8);
   placeFree('dirt_road', 9, 8);
-  placeFree('dirt_road', 10, 8);
-  placeFree('dirt_road', 11, 8);
 
-  // Market Square at (9, 7)
-  placeFree('market_square', 9, 7);
-
-  // 3 Pioneer Cabins
-  placeFree('pioneer_cabin', 8, 7, 7);
-  placeFree('pioneer_cabin', 8, 9, 7);
-  placeFree('pioneer_cabin', 9, 9, 6);
-
-  // Starter Fishery at (5, 8) next to coastal_water (4, 8)
-  placeFree('fishery', 5, 8);
-
-  // Starter Lumberjack Hut at (11, 7) next to forest (11, 6) and (12, 7)
-  placeFree('lumberjack_hut', 11, 7);
+  // Founding crew's initial Pioneer Cabin at (8, 7)
+  placeFree('pioneer_cabin', 8, 7, 6);
 }
 
 export function getTile(state: GameState, x: number, y: number): Tile | undefined {
@@ -363,6 +360,7 @@ export function placeBuilding(
   }
 
   recalculateNetworkAndCapacities(state);
+  evaluateTutorialProgress(state);
   return { success: true, building };
 }
 
@@ -583,6 +581,7 @@ export function unlockTech(
   });
 
   recalculateNetworkAndCapacities(state);
+  evaluateTutorialProgress(state);
   checkWinCondition(state);
   return { success: true };
 }
@@ -891,11 +890,11 @@ export function stepSimulation(state: GameState, dtSeconds: number): void {
     if (!bld.connectedToLogistics) continue;
 
     const cap = def.housing.capacity;
-    if (state.happiness >= 55 && bld.residents < cap) {
-      const growthPerSec = state.happiness >= 80 ? 0.35 : 0.18;
+    if (state.happiness >= 45 && bld.residents < cap) {
+      const growthPerSec = state.happiness >= 75 ? 0.09 : 0.05;
       bld.residents = Math.min(cap, bld.residents + growthPerSec * dtSeconds);
     } else if (state.happiness < 30 && bld.residents > 2) {
-      bld.residents = Math.max(2, bld.residents - 0.1 * dtSeconds);
+      bld.residents = Math.max(2, bld.residents - 0.04 * dtSeconds);
     }
   }
 
@@ -1028,11 +1027,151 @@ export function stepSimulation(state: GameState, dtSeconds: number): void {
   }
 
   recalculateNetworkAndCapacities(state);
+  evaluateTutorialProgress(state);
   checkWinCondition(state);
+}
+
+export function unsealFutureTrunks(state: GameState): void {
+  if (state.trunksUnsealed) return;
+  state.trunksUnsealed = true;
+  state.resources.insight += 20;
+  state.chronicle.unshift({
+    id: `chronicle_trunks_${state.day}`,
+    day: state.day,
+    yearText: getColonialYearString(state.day),
+    title: 'Unsealed the Oilskin Archives',
+    text: 'With basic timber, fishing, and shelter secured, your expedition unlocked the sealed trunks of future scientific treatises (+20 Future Insight).',
+    category: 'milestone'
+  });
+}
+
+export function evaluateTutorialProgress(
+  state: GameState
+): { advanced: boolean; completedStepTitle?: string } {
+  const blds = Object.values(state.buildings);
+  const hasLumberjack = blds.some((b) => b.defId === 'lumberjack_hut');
+  const hasConnectedLumberjack = blds.some(
+    (b) => b.defId === 'lumberjack_hut' && b.connectedToLogistics
+  );
+  const hasConnectedFishery = blds.some(
+    (b) => b.defId === 'fishery' && b.connectedToLogistics
+  );
+  const connectedResidences = blds.filter(
+    (b) => Boolean(BUILDINGS[b.defId]?.housing) && b.connectedToLogistics
+  ).length;
+  const hasConnectedMarket = blds.some(
+    (b) => b.defId === 'market_square' && b.connectedToLogistics
+  );
+  const hasConnectedSawmill = blds.some(
+    (b) => b.defId === 'sawmill' && b.connectedToLogistics
+  );
+
+  // Even if tutorial was skipped, unseal trunks once basic survival infrastructure is built
+  if (
+    !state.trunksUnsealed &&
+    hasConnectedLumberjack &&
+    hasConnectedFishery &&
+    hasConnectedSawmill
+  ) {
+    unsealFutureTrunks(state);
+  }
+
+  if (!state.tutorialActive || state.tutorialCompleted) {
+    return { advanced: false };
+  }
+
+  let advanced = false;
+  let completedStepTitle: string | undefined;
+
+  while (state.tutorialStepIndex < TUTORIAL_STEPS.length) {
+    const step = TUTORIAL_STEPS[state.tutorialStepIndex];
+    let stepMet = false;
+
+    switch (step.id) {
+      case 'survey_landing':
+        // Advances if manually clicked OR if player already built their Lumberjack Camp
+        stepMet = hasLumberjack;
+        break;
+      case 'build_lumberjack':
+        stepMet = hasLumberjack;
+        break;
+      case 'connect_lumberjack_road':
+        stepMet = hasConnectedLumberjack;
+        break;
+      case 'build_fishery':
+        stepMet = hasConnectedFishery;
+        break;
+      case 'shelter_and_market':
+        stepMet = connectedResidences >= 3 && hasConnectedMarket;
+        break;
+      case 'build_sawmill':
+        stepMet = hasConnectedSawmill;
+        break;
+      case 'unseal_future_knowledge':
+        stepMet = state.unlockedTechIds.length >= 1;
+        break;
+    }
+
+    if (!stepMet) break;
+
+    completedStepTitle = step.title;
+    // Grant a small colonial supply cache when completing early gathering steps
+    if (step.id === 'connect_lumberjack_road') {
+      addResourceWithCap(state, 'wood', 14);
+    } else if (step.id === 'build_fishery') {
+      addResourceWithCap(state, 'fish', 10);
+    }
+    state.tutorialStepIndex += 1;
+    advanced = true;
+
+    // When reaching Step 7 (index 6: unseal_future_knowledge), unseal the Future Archives trunks!
+    if (
+      state.tutorialStepIndex < TUTORIAL_STEPS.length &&
+      TUTORIAL_STEPS[state.tutorialStepIndex].id === 'unseal_future_knowledge'
+    ) {
+      unsealFutureTrunks(state);
+    }
+
+    if (state.tutorialStepIndex >= TUTORIAL_STEPS.length) {
+      state.tutorialCompleted = true;
+      state.tutorialActive = false;
+      break;
+    }
+  }
+
+  return { advanced, completedStepTitle };
+}
+
+export function advanceTutorialManually(state: GameState): boolean {
+  if (!state.tutorialActive || state.tutorialCompleted) return false;
+  const step = TUTORIAL_STEPS[state.tutorialStepIndex];
+  if (!step) return false;
+
+  state.tutorialStepIndex += 1;
+  if (
+    state.tutorialStepIndex < TUTORIAL_STEPS.length &&
+    TUTORIAL_STEPS[state.tutorialStepIndex].id === 'unseal_future_knowledge'
+  ) {
+    unsealFutureTrunks(state);
+  }
+  if (state.tutorialStepIndex >= TUTORIAL_STEPS.length) {
+    state.tutorialCompleted = true;
+    state.tutorialActive = false;
+  }
+  evaluateTutorialProgress(state);
+  return true;
+}
+
+export function skipTutorial(state: GameState): void {
+  state.introSeen = true;
+  state.tutorialActive = false;
+  state.tutorialCompleted = true;
 }
 
 export function checkAndTriggerHistoricalEvents(state: GameState): void {
   if (state.activeEventId) return;
+  // Do not interrupt the player with historical dilemmas while they are still in the basic survival tutorial
+  if (state.tutorialActive && !state.tutorialCompleted) return;
 
   for (const evt of HISTORICAL_EVENTS) {
     if (state.completedEventIds.includes(evt.id)) continue;

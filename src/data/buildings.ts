@@ -17,7 +17,7 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     serviceRadius: 8,
     serviceType: 'logistics',
     storageBonus: 100,
-    passiveInsightPerMin: 2.0,
+    passiveInsightPerMin: 0.5,
     paradoxDampeningPerMin: 0.4
   },
   dirt_road: {
@@ -43,7 +43,7 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     color: '#b56576',
     accentColor: '#f4a261',
     description: 'Distributes food and goods to nearby homes within 6 tiles and reassures townsfolk, reducing Paradox suspicion.',
-    cost: { wood: 20, planks: 10, coin: 60 },
+    cost: { wood: 14, planks: 8, coin: 45 },
     upkeepCoinPerMin: 4,
     workersRequired: 4,
     allowedTerrains: ['grass', 'fertile_soil'],
@@ -132,9 +132,9 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
         id: 'fell_timber',
         name: 'Colonial Logging',
         inputs: {},
-        outputs: { wood: 4 },
-        cycleSeconds: 6,
-        description: 'Harvests 4 Timber every 6 seconds from nearby forest stands.'
+        outputs: { wood: 2 },
+        cycleSeconds: 12,
+        description: 'Harvests 2 Timber every 12 seconds from nearby forest stands.'
       }
     ]
   },
@@ -146,29 +146,29 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     color: '#b07d4f',
     accentColor: '#ffe5d9',
     description: 'Cuts raw Timber into Milled Planks for advanced colonial buildings.',
-    cost: { wood: 16, stone: 4, coin: 35 },
-    upkeepCoinPerMin: 3,
-    workersRequired: 5,
+    cost: { wood: 14, stone: 4, coin: 35 },
+    upkeepCoinPerMin: 2,
+    workersRequired: 4,
     allowedTerrains: ['grass', 'fertile_soil'],
     requiresRoad: true,
     recipes: [
       {
         id: 'pit_saw_planks',
         name: 'Two-Man Pit Sawing',
-        inputs: { wood: 3 },
-        outputs: { planks: 3 },
-        cycleSeconds: 6,
-        description: 'Traditional colonial pit sawing converts 3 Timber into 3 Planks.'
+        inputs: { wood: 2 },
+        outputs: { planks: 2 },
+        cycleSeconds: 14,
+        description: 'Traditional colonial pit sawing converts 2 Timber into 2 Planks.'
       },
       {
         id: 'circular_saw_planks',
         name: 'Water-Driven Circular Saw (Anachronistic)',
         inputs: { wood: 2 },
-        outputs: { planks: 5 },
-        cycleSeconds: 5,
+        outputs: { planks: 4 },
+        cycleSeconds: 11,
         requiredTechId: 'water_circular_saw',
         isAnachronistic: true,
-        description: '19th-century rotary blade geometry yields 5 Planks from just 2 Timber.'
+        description: '19th-century rotary blade geometry yields 4 Planks from 2 Timber.'
       }
     ]
   },
@@ -180,9 +180,9 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     color: '#1d6fa5',
     accentColor: '#90e0ef',
     description: 'Catches and salts fish to feed Pioneers and Colonists. Must be placed on or adjacent to Coastal Shallows or River.',
-    cost: { wood: 14, coin: 25 },
-    upkeepCoinPerMin: 2,
-    workersRequired: 4,
+    cost: { wood: 12, coin: 20 },
+    upkeepCoinPerMin: 1,
+    workersRequired: 3,
     allowedTerrains: ['coastal_water', 'river', 'grass'],
     adjacentTerrainRequired: ['coastal_water', 'river'],
     requiresRoad: true,
@@ -191,9 +191,9 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
         id: 'coastal_netting',
         name: 'Weir & Line Fishing',
         inputs: {},
-        outputs: { fish: 4 },
-        cycleSeconds: 6,
-        description: 'Produces 4 Salted Fish every 6 seconds.'
+        outputs: { fish: 2 },
+        cycleSeconds: 12,
+        description: 'Produces 2 Salted Fish every 12 seconds.'
       }
     ]
   },
@@ -206,8 +206,8 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     accentColor: '#ede0d4',
     description: 'Cultivates Wheat Grain. Must be built on Alluvial Loam (Fertile Soil).',
     cost: { wood: 14, planks: 6, coin: 35 },
-    upkeepCoinPerMin: 3,
-    workersRequired: 5,
+    upkeepCoinPerMin: 2,
+    workersRequired: 4,
     allowedTerrains: ['fertile_soil'],
     requiresRoad: true,
     recipes: [
@@ -215,16 +215,16 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
         id: 'colonial_fallow_farming',
         name: 'Two-Field Broadcast Sowing',
         inputs: {},
-        outputs: { grain: 4 },
-        cycleSeconds: 7,
-        description: 'Traditional sowing yields 4 Wheat Grain per cycle.'
+        outputs: { grain: 2 },
+        cycleSeconds: 15,
+        description: 'Traditional sowing yields 2 Wheat Grain per cycle.'
       },
       {
         id: 'four_course_seed_drill',
         name: 'Norfolk 4-Course & Seed Drill (Anachronistic)',
         inputs: {},
-        outputs: { grain: 9 },
-        cycleSeconds: 6,
+        outputs: { grain: 5 },
+        cycleSeconds: 12,
         requiredTechId: 'crop_rotation',
         isAnachronistic: true,
         description: 'Clover nitrogen fixation and mechanical row drilling more than double grain output.'
@@ -240,28 +240,28 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     accentColor: '#fef3c7',
     description: 'Grinds Wheat Grain into flour and bakes Artisan Bread for Colonists and Innovators.',
     cost: { wood: 12, planks: 10, stone: 8, coin: 50 },
-    upkeepCoinPerMin: 4,
-    workersRequired: 6,
+    upkeepCoinPerMin: 3,
+    workersRequired: 5,
     allowedTerrains: ['grass', 'fertile_soil'],
     requiresRoad: true,
     recipes: [
       {
         id: 'brick_hearth_bread',
         name: 'Brick Hearth Baking',
-        inputs: { grain: 3, wood: 1 },
-        outputs: { bread: 4 },
-        cycleSeconds: 6,
-        description: 'Bakes 4 Bread from 3 Grain and 1 Timber fuel.'
+        inputs: { grain: 2, wood: 1 },
+        outputs: { bread: 2 },
+        cycleSeconds: 14,
+        description: 'Bakes 2 Bread from 2 Grain and 1 Timber fuel.'
       },
       {
         id: 'convection_yeast_bread',
         name: 'Pure-Culture Yeast & Cast-Iron Oven (Anachronistic)',
         inputs: { grain: 2 },
-        outputs: { bread: 7 },
-        cycleSeconds: 5,
+        outputs: { bread: 4 },
+        cycleSeconds: 11,
         requiredTechId: 'crop_rotation',
         isAnachronistic: true,
-        description: 'Isolated yeast strains and baffled heat retention produce 7 Bread from 2 Grain.'
+        description: 'Isolated yeast strains and baffled heat retention produce 4 Bread from 2 Grain.'
       }
     ]
   },
@@ -273,9 +273,9 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     color: '#6c757d',
     accentColor: '#dee2e6',
     description: 'Extracts Cut Stone. Must be built on or directly adjacent to a Granite Outcrop.',
-    cost: { wood: 18, planks: 6, coin: 40 },
-    upkeepCoinPerMin: 3,
-    workersRequired: 5,
+    cost: { wood: 16, planks: 6, coin: 40 },
+    upkeepCoinPerMin: 2,
+    workersRequired: 4,
     allowedTerrains: ['stone_deposit', 'grass'],
     adjacentTerrainRequired: ['stone_deposit'],
     requiresRoad: true,
@@ -284,9 +284,9 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
         id: 'quarry_stone',
         name: 'Plug & Feather Quarrying',
         inputs: {},
-        outputs: { stone: 3 },
-        cycleSeconds: 7,
-        description: 'Quarries 3 Cut Stone every 7 seconds.'
+        outputs: { stone: 2 },
+        cycleSeconds: 15,
+        description: 'Quarries 2 Cut Stone every 15 seconds.'
       }
     ]
   },
@@ -298,9 +298,9 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     color: '#5c4033',
     accentColor: '#d6ccc2',
     description: 'Extracts Iron Ore. Must be built on or directly adjacent to an Iron Ore Seam.',
-    cost: { wood: 20, planks: 10, stone: 8, coin: 55 },
-    upkeepCoinPerMin: 4,
-    workersRequired: 6,
+    cost: { wood: 18, planks: 10, stone: 8, coin: 55 },
+    upkeepCoinPerMin: 3,
+    workersRequired: 5,
     allowedTerrains: ['iron_deposit', 'grass'],
     adjacentTerrainRequired: ['iron_deposit'],
     requiresRoad: true,
@@ -309,9 +309,9 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
         id: 'mine_iron_ore',
         name: 'Shaft & Winch Mining',
         inputs: {},
-        outputs: { iron_ore: 3 },
-        cycleSeconds: 7,
-        description: 'Extracts 3 Iron Ore every 7 seconds.'
+        outputs: { iron_ore: 2 },
+        cycleSeconds: 16,
+        description: 'Extracts 2 Iron Ore every 16 seconds.'
       }
     ]
   },
@@ -324,28 +324,28 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     accentColor: '#f87171',
     description: 'Smelts Iron Ore with Timber charcoal to forge Precision Tools.',
     cost: { planks: 12, stone: 12, coin: 70 },
-    upkeepCoinPerMin: 5,
-    workersRequired: 6,
+    upkeepCoinPerMin: 4,
+    workersRequired: 5,
     allowedTerrains: ['grass', 'fertile_soil'],
     requiresRoad: true,
     recipes: [
       {
         id: 'bloomery_tools',
         name: 'Colonial Bloomery Forge',
-        inputs: { iron_ore: 2, wood: 2 },
+        inputs: { iron_ore: 2, wood: 1 },
         outputs: { tools: 2 },
-        cycleSeconds: 7,
-        description: 'Forges 2 Tools from 2 Iron Ore and 2 Timber.'
+        cycleSeconds: 16,
+        description: 'Forges 2 Tools from 2 Iron Ore and 1 Timber.'
       },
       {
         id: 'crucible_steel_tools',
         name: 'Bessemer Air-Blast Crucible (Anachronistic)',
         inputs: { iron_ore: 2, wood: 1 },
-        outputs: { tools: 5 },
-        cycleSeconds: 5,
+        outputs: { tools: 4 },
+        cycleSeconds: 12,
         requiredTechId: 'bessemer_metallurgy',
         isAnachronistic: true,
-        description: 'Forced-air decarburization produces 5 high-carbon Steel Tools with half the fuel.'
+        description: 'Forced-air decarburization produces 4 high-carbon Steel Tools.'
       }
     ]
   },
@@ -359,7 +359,7 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     description: 'Cultivates medicinal willow bark, cinchona, and antiseptic herbs.',
     cost: { wood: 12, planks: 6, coin: 35 },
     upkeepCoinPerMin: 2,
-    workersRequired: 4,
+    workersRequired: 3,
     allowedTerrains: ['grass', 'fertile_soil'],
     requiresRoad: true,
     recipes: [
@@ -367,9 +367,9 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
         id: 'cultivate_herbs',
         name: 'Physic Garden Cultivation',
         inputs: {},
-        outputs: { herbs: 3 },
-        cycleSeconds: 6,
-        description: 'Harvests 3 Medicinal Herbs every 6 seconds.'
+        outputs: { herbs: 2 },
+        cycleSeconds: 14,
+        description: 'Harvests 2 Medicinal Herbs every 14 seconds.'
       }
     ]
   },
@@ -382,8 +382,8 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     accentColor: '#5eead4',
     description: 'Anachronistic public-health clinic. Provides Sanitation within 7 tiles and distills Antiseptic Tonics from Herbs.',
     cost: { planks: 14, stone: 10, tools: 4, coin: 85 },
-    upkeepCoinPerMin: 5,
-    workersRequired: 5,
+    upkeepCoinPerMin: 4,
+    workersRequired: 4,
     allowedTerrains: ['grass', 'fertile_soil'],
     requiresRoad: true,
     serviceRadius: 7,
@@ -395,10 +395,10 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
         id: 'distill_antiseptic',
         name: 'Boiled-Water & Salicylate Distillation (Anachronistic)',
         inputs: { herbs: 2 },
-        outputs: { medicine: 3 },
-        cycleSeconds: 6,
+        outputs: { medicine: 2 },
+        cycleSeconds: 14,
         isAnachronistic: true,
-        description: 'Distills 3 Antiseptic Tonics from 2 Herbs while keeping nearby water supplies clean.'
+        description: 'Distills 2 Antiseptic Tonics from 2 Herbs while keeping nearby water supplies clean.'
       }
     ]
   },
@@ -409,15 +409,15 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     icon: '🔭',
     color: '#6d28d9',
     accentColor: '#c4b5fd',
-    description: 'Translates your future archives into colonial treatises. Generates +6 Insight/min, provides Knowledge within 7 tiles, and stabilizes Paradox.',
+    description: 'Translates your future archives into colonial treatises. Generates +3 Insight/min, provides Knowledge within 7 tiles, and stabilizes Paradox.',
     cost: { planks: 16, stone: 14, tools: 6, coin: 110 },
-    upkeepCoinPerMin: 6,
-    workersRequired: 6,
+    upkeepCoinPerMin: 5,
+    workersRequired: 5,
     allowedTerrains: ['grass', 'fertile_soil'],
     requiresRoad: true,
     serviceRadius: 7,
     serviceType: 'knowledge',
-    passiveInsightPerMin: 6.0,
+    passiveInsightPerMin: 3.0,
     paradoxDampeningPerMin: 1.2,
     divergenceOnBuild: 5
   }

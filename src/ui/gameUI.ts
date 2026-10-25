@@ -4,10 +4,12 @@ import { POPULATION_TIERS, POPULATION_TIER_ORDER } from '../data/population.ts';
 import { RESOURCES, RESOURCE_ORDER } from '../data/resources.ts';
 import { TECHNOLOGIES, TECHNOLOGY_LIST } from '../data/technologies.ts';
 import { TERRAINS } from '../data/terrain.ts';
+import { INTRO_STORY, TUTORIAL_STEPS } from '../data/tutorial.ts';
 import type { BuildingCategory, ResourceId } from '../data/types.ts';
 import {
   type GameState,
   WIN_CONDITIONS,
+  advanceTutorialManually,
   canPlaceBuilding,
   canUnlockTech,
   canUpgradeHouse,
@@ -18,8 +20,10 @@ import {
   placeBuilding,
   resolveHistoricalEvent,
   setBuildingRecipe,
+  skipTutorial,
   toggleBuildingPaused,
   unlockTech,
+  unsealFutureTrunks,
   upgradeHouse
 } from '../core/simulation.ts';
 import { clearSavedGame, saveGameToStorage } from '../core/storage.ts';
@@ -33,6 +37,8 @@ export class GameUI {
   private activeCategory: BuildingCategory | 'all' = 'all';
   private activeModal: 'tech' | 'chronicle' | null = null;
   private lastRenderedEventId: string | null = null;
+  private lastTutorialStepIndex = -1;
+  private lastTutorialActive = false;
   private toastTimeout: number | null = null;
 
   constructor(state: GameState, renderer: CanvasRenderer, onResetGame: () => void) {
@@ -43,14 +49,27 @@ export class GameUI {
     this.bindStaticControls();
     this.renderBuildToolbar();
     this.renderInspector();
+    this.renderTutorialPanel();
+    if (!this.state.introSeen) {
+      this.state.speed = 0;
+      this.renderIntroModal(true);
+    }
     this.updateHUD();
   }
 
   public setState(newState: GameState): void {
     this.state = newState;
     this.lastRenderedEventId = null;
+    this.lastTutorialStepIndex = -1;
     this.renderBuildToolbar();
     this.renderInspector();
+    this.renderTutorialPanel();
+    if (!this.state.introSeen) {
+      this.state.speed = 0;
+      this.renderIntroModal(true);
+    } else {
+      this.renderIntroModal(false);
+    }
     this.updateHUD();
   }
 
@@ -84,6 +103,10 @@ export class GameUI {
 
     document.getElementById('btn-open-chronicle')?.addEventListener('click', () => {
       this.openModal(this.activeModal === 'chronicle' ? null : 'chronicle');
+    });
+
+    document.getElementById('btn-open-intro')?.addEventListener('click', () => {
+      this.renderIntroModal(true);
     });
 
     document.getElementById('btn-center-camera')?.addEventListener('click', () => {
@@ -303,6 +326,15 @@ export class GameUI {
       } else {
         winModal.classList.add('hidden');
       }
+    }
+
+    if (
+      this.state.tutorialStepIndex !== this.lastTutorialStepIndex ||
+      this.state.tutorialActive !== this.lastTutorialActive
+    ) {
+      this.lastTutorialStepIndex = this.state.tutorialStepIndex;
+      this.lastTutorialActive = this.state.tutorialActive;
+      this.renderTutorialPanel();
     }
 
     this.renderSettlementOverviewCard();
@@ -860,6 +892,157 @@ export class GameUI {
           this.showToast(res.reason, 'warn');
         }
       });
+    });
+  }
+
+  public renderIntroModal(show: boolean): void {
+    const modal = document.getElementById('modal-intro');
+    const body = document.getElementById('intro-modal-body');
+    if (!modal || !body) return;
+
+    if (!show) {
+      modal.classList.add('hidden');
+      return;
+    }
+
+    modal.classList.remove('hidden');
+    body.innerHTML = `
+      <div class="intro-subtitle">${INTRO_STORY.subtitle}</div>
+      <h2 class="intro-headline">${INTRO_STORY.headline}</h2>
+      <div class="intro-dateloc">📍 ${INTRO_STORY.dateLocation}</div>
+      <div class="intro-story-body">
+        ${INTRO_STORY.paragraphs.map((p) => `<p>${p}</p>`).join('')}
+      </div>
+      <div class="intro-directives">
+        ${INTRO_STORY.directives.map((d) => `<div>${d}</div>`).join('')}
+      </div>
+      <div class="intro-buttons-row">
+        <button id="btn-start-guided" class="btn-start-guided">
+          🧭 Begin Guided Expedition (Tutorial)
+        </button>
+        <button id="btn-skip-intro" class="btn-skip-intro">
+          ⏭ Skip Intro & Tutorial
+        </button>
+      </div>
+    `;
+
+    document.getElementById('btn-start-guided')?.addEventListener('click', () => {
+      this.state.introSeen = true;
+      this.state.tutorialActive = true;
+      this.state.tutorialCompleted = false;
+      if (this.state.tutorialStepIndex >= TUTORIAL_STEPS.length) {
+        this.state.tutorialStepIndex = 0;
+      }
+      this.state.speed = 1;
+      modal.classList.add('hidden');
+      this.renderTutorialPanel();
+      this.updateHUD();
+      this.showToast('Guided Expedition started. Follow the steps in the top-left panel!', 'info');
+    });
+
+    document.getElementById('btn-skip-intro')?.addEventListener('click', () => {
+      skipTutorial(this.state);
+      unsealFutureTrunks(this.state);
+      this.state.speed = 1;
+      modal.classList.add('hidden');
+      this.renderTutorialPanel();
+      this.updateHUD();
+      this.showToast('Tutorial skipped. Expedition trunks unsealed (+20 Future Insight).', 'info');
+    });
+  }
+
+  public renderTutorialPanel(): void {
+    const panel = document.getElementById('tutorial-panel');
+    if (!panel) return;
+
+    if (!this.state.tutorialActive || this.state.tutorialCompleted) {
+      panel.classList.add('hidden');
+      return;
+    }
+
+    const step = TUTORIAL_STEPS[this.state.tutorialStepIndex];
+    if (!step) {
+      panel.classList.add('hidden');
+      return;
+    }
+
+    panel.classList.remove('hidden');
+
+    const dotsHtml = TUTORIAL_STEPS.map((s, idx) => {
+      const cls =
+        idx < this.state.tutorialStepIndex
+          ? 'done'
+          : idx === this.state.tutorialStepIndex
+            ? 'current'
+            : '';
+      return `<div class="tutorial-dot ${cls}" title="${s.title}"></div>`;
+    }).join('');
+
+    let primaryBtnHtml = '';
+    if (step.recommendedBuildDefId) {
+      const bDef = BUILDINGS[step.recommendedBuildDefId];
+      primaryBtnHtml = `
+        <button id="btn-tutorial-select-build" class="btn-tutorial-action">
+          🔨 Select ${bDef.icon} ${bDef.name}
+        </button>
+      `;
+    } else if (step.allowManualAdvance) {
+      primaryBtnHtml = `
+        <button id="btn-tutorial-next" class="btn-tutorial-action">
+          ✓ Complete Step & Continue
+        </button>
+      `;
+    } else if (step.id === 'unseal_future_knowledge') {
+      primaryBtnHtml = `
+        <button id="btn-tutorial-open-tech" class="btn-tutorial-action">
+          ⏳ Open Future Knowledge
+        </button>
+      `;
+    }
+
+    panel.innerHTML = `
+      <div class="tutorial-top-bar">
+        <span class="tutorial-step-badge">🧭 Walkthrough • Step ${step.index + 1} of ${TUTORIAL_STEPS.length}</span>
+        <button id="btn-tutorial-skip" class="btn-skip-tutorial" title="Skip Tutorial at any time">Skip Tutorial ✕</button>
+      </div>
+      <h4>${step.title}</h4>
+      <p class="tutorial-narrative">${step.narrative}</p>
+      <div class="tutorial-objective-box">
+        <strong>Objective:</strong> ${step.objectiveText}
+      </div>
+      <div class="tutorial-actions-row">
+        ${primaryBtnHtml}
+      </div>
+      <div class="tutorial-dots">${dotsHtml}</div>
+    `;
+
+    document.getElementById('btn-tutorial-skip')?.addEventListener('click', () => {
+      skipTutorial(this.state);
+      unsealFutureTrunks(this.state);
+      this.renderTutorialPanel();
+      this.updateHUD();
+      this.showToast('Tutorial skipped. You have full command of the colony!', 'info');
+    });
+
+    document.getElementById('btn-tutorial-select-build')?.addEventListener('click', () => {
+      if (!step.recommendedBuildDefId) return;
+      this.renderer.tool = { mode: 'build', defId: step.recommendedBuildDefId };
+      if (step.highlightTiles && step.highlightTiles.length > 0) {
+        const t = step.highlightTiles[0];
+        this.renderer.centerOnTile(t.x, t.y);
+      }
+      this.renderBuildToolbar();
+      this.showToast(`Selected ${BUILDINGS[step.recommendedBuildDefId].name}. Click a highlighted tile on the map!`, 'info');
+    });
+
+    document.getElementById('btn-tutorial-next')?.addEventListener('click', () => {
+      advanceTutorialManually(this.state);
+      this.renderTutorialPanel();
+      this.updateHUD();
+    });
+
+    document.getElementById('btn-tutorial-open-tech')?.addEventListener('click', () => {
+      this.openModal('tech');
     });
   }
 }

@@ -1,6 +1,14 @@
 import { BUILDINGS } from '../data/buildings.ts';
 import { TERRAINS } from '../data/terrain.ts';
-import { type GameState, type PlacedBuilding, canPlaceBuilding, canUpgradeHouse, getTile } from '../core/simulation.ts';
+import { TUTORIAL_STEPS } from '../data/tutorial.ts';
+import {
+  type GameState,
+  type PlacedBuilding,
+  canPlaceBuilding,
+  canUpgradeHouse,
+  getOrthogonalNeighbors,
+  getTile
+} from '../core/simulation.ts';
 
 export type InteractionTool =
   | { mode: 'select' }
@@ -212,6 +220,7 @@ export class CanvasRenderer {
         ctx.fillStyle = (x + y) % 2 === 0 ? tDef.color : tDef.secondaryColor;
         ctx.fillRect(px, py, ts + 0.6, ts + 0.6);
 
+        this.drawShorelineBorders(ctx, state, x, y, px, py, ts, tile.terrain);
         this.drawTerrainDetails(ctx, state, x, y, px, py, ts, tile.terrain, tile.decorationSeed);
 
         // Subtle grid line
@@ -240,6 +249,9 @@ export class CanvasRenderer {
       }
     }
 
+    // 3.5. Draw Tutorial Target Beacons if tutorial is active
+    this.drawTutorialHighlights(ctx, state, ts);
+
     // 4. Draw Selection Highlight
     if (this.selectedTile) {
       const { x, y } = this.selectedTile;
@@ -261,6 +273,42 @@ export class CanvasRenderer {
         this.drawHoverAndPlacementGhost(ctx, state, x, y, px, py, ts);
       }
     }
+  }
+
+  private drawShorelineBorders(
+    ctx: CanvasRenderingContext2D,
+    state: GameState,
+    x: number,
+    y: number,
+    px: number,
+    py: number,
+    ts: number,
+    terrain: string
+  ): void {
+    const isWater =
+      terrain === 'deep_water' || terrain === 'coastal_water' || terrain === 'river';
+    if (isWater) return;
+
+    const band = Math.max(3, ts * 0.09);
+    ctx.fillStyle = '#d4be8d';
+
+    const top = getTile(state, x, y - 1);
+    const right = getTile(state, x + 1, y);
+    const bottom = getTile(state, x, y + 1);
+    const left = getTile(state, x - 1, y);
+
+    const checkWater = (t?: { terrain: string }) =>
+      Boolean(
+        t &&
+          (t.terrain === 'deep_water' ||
+            t.terrain === 'coastal_water' ||
+            t.terrain === 'river')
+      );
+
+    if (checkWater(top)) ctx.fillRect(px, py, ts, band);
+    if (checkWater(bottom)) ctx.fillRect(px, py + ts - band, ts, band);
+    if (checkWater(left)) ctx.fillRect(px, py, band, ts);
+    if (checkWater(right)) ctx.fillRect(px + ts - band, py, band, ts);
   }
 
   private drawTerrainDetails(
@@ -318,6 +366,17 @@ export class CanvasRenderer {
     }
 
     if (terrain === 'forest' && !hasBuilding) {
+      const nearLumberjack = getOrthogonalNeighbors(state, x, y).some(
+        (n) => n.buildingId && state.buildings[n.buildingId]?.defId === 'lumberjack_hut'
+      );
+      if (nearLumberjack) {
+        ctx.fillStyle = '#5c4033';
+        ctx.fillRect(px + ts * 0.66, py + ts * 0.66, ts * 0.16, ts * 0.12);
+        ctx.fillStyle = '#d4a373';
+        ctx.beginPath();
+        ctx.arc(px + ts * 0.74, py + ts * 0.66, ts * 0.08, 0, Math.PI * 2);
+        ctx.fill();
+      }
       // Draw 3 layered colonial pines/oaks
       const centers = [
         { cx: 0.32, cy: 0.36, r: 0.2 },
@@ -392,26 +451,32 @@ export class CanvasRenderer {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.36)';
     ctx.fillRect(bx + 2, by + 3, bw, bh);
 
-    // Main building body
-    ctx.fillStyle = def.color;
-    ctx.fillRect(bx, by, bw, bh);
-
     // Roof / border accent
     const activeRecipe = def.recipes?.find((r) => r.id === bld.activeRecipeId);
     const isAnachronisticActive = Boolean(
       activeRecipe?.isAnachronistic || def.category === 'temporal'
     );
 
+    // Unknown Horizons-inspired colonial architectural illustration
+    this.drawColonialArchitecture(ctx, bld, bx, by, bw, bh, px, py, ts, isAnachronisticActive);
+
     ctx.strokeStyle = isAnachronisticActive ? '#c084fc' : def.accentColor;
     ctx.lineWidth = isAnachronisticActive ? 2.2 : 1.5;
     ctx.strokeRect(bx, by, bw, bh);
 
-    // Building Icon
-    ctx.font = `${Math.floor(ts * 0.42)}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
+    if (
+      bld.status === 'working' &&
+      (bld.defId === 'bakery' || bld.defId === 'blacksmith' || bld.defId === 'apothecary')
+    ) {
+      this.drawChimneySmoke(ctx, px + ts * 0.74, py + ts * 0.22, ts, isAnachronisticActive);
+    }
+
+    // Building Icon badge
+    ctx.font = `${Math.floor(ts * 0.26)}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(def.icon, px + ts * 0.5, py + ts * 0.46);
+    ctx.fillText(def.icon, px + ts * 0.73, py + ts * 0.3);
 
     // Production progress bar at bottom of building
     if (def.recipes && def.recipes.length > 0 && activeRecipe) {
@@ -463,6 +528,232 @@ export class CanvasRenderer {
       ctx.fillStyle = '#ffffff';
       ctx.font = `bold ${Math.max(8, Math.floor(ts * 0.16))}px system-ui, sans-serif`;
       ctx.fillText(bld.status === 'paused' ? '⏸' : '!', px + pad + 5, py + pad + 5.5);
+    }
+  }
+
+  private drawColonialArchitecture(
+    ctx: CanvasRenderingContext2D,
+    bld: PlacedBuilding,
+    bx: number,
+    by: number,
+    bw: number,
+    bh: number,
+    px: number,
+    py: number,
+    ts: number,
+    isAnachronistic: boolean
+  ): void {
+    const def = BUILDINGS[bld.defId];
+    ctx.fillStyle = def.color;
+    ctx.fillRect(bx, by, bw, bh);
+
+    switch (bld.defId) {
+      case 'founding_camp': {
+        ctx.fillStyle = '#cbb389';
+        ctx.fillRect(bx + 2, by + bh * 0.55, bw - 4, bh * 0.42);
+        ctx.fillStyle = '#2b4562';
+        ctx.fillRect(bx + 4, by + bh * 0.22, bw - 8, bh * 0.48);
+        ctx.fillStyle = '#456990';
+        ctx.beginPath();
+        ctx.moveTo(bx + 2, by + bh * 0.35);
+        ctx.lineTo(px + ts * 0.5, by + 4);
+        ctx.lineTo(bx + bw - 2, by + bh * 0.35);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#a36836';
+        ctx.fillRect(bx + 6, by + bh * 0.68, bw * 0.22, bh * 0.2);
+        ctx.fillRect(bx + bw * 0.34, by + bh * 0.7, bw * 0.2, bh * 0.18);
+        break;
+      }
+      case 'market_square': {
+        ctx.fillStyle = '#7f8c8d';
+        ctx.fillRect(bx + 2, by + 2, bw - 4, bh - 4);
+        ctx.fillStyle = '#e76f51';
+        ctx.fillRect(bx + 4, by + 5, bw * 0.44, bh * 0.34);
+        ctx.fillStyle = '#f4f1de';
+        ctx.fillRect(bx + 4 + bw * 0.14, by + 5, bw * 0.14, bh * 0.34);
+        ctx.fillStyle = '#2a9d8f';
+        ctx.fillRect(bx + 5, by + bh * 0.52, bw * 0.42, bh * 0.32);
+        ctx.fillStyle = '#e2e8f0';
+        ctx.beginPath();
+        ctx.arc(px + ts * 0.62, py + ts * 0.6, ts * 0.1, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'pioneer_cabin':
+      case 'colonial_homestead':
+      case 'enlightened_manor': {
+        const wallColor =
+          bld.defId === 'pioneer_cabin'
+            ? '#7f5539'
+            : bld.defId === 'colonial_homestead'
+              ? '#e6ccb2'
+              : '#d8e2dc';
+        const roofColor =
+          bld.defId === 'pioneer_cabin'
+            ? '#9c6644'
+            : bld.defId === 'colonial_homestead'
+              ? '#9e2a2b'
+              : '#4a4e69';
+        ctx.fillStyle = wallColor;
+        ctx.fillRect(bx + bw * 0.12, by + bh * 0.38, bw * 0.68, bh * 0.4);
+        ctx.fillStyle = roofColor;
+        ctx.beginPath();
+        ctx.moveTo(bx + bw * 0.06, by + bh * 0.42);
+        ctx.lineTo(px + ts * 0.42, by + bh * 0.12);
+        ctx.lineTo(bx + bw * 0.82, by + bh * 0.42);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#fde047';
+        ctx.fillRect(bx + bw * 0.22, by + bh * 0.48, bw * 0.14, bh * 0.14);
+        ctx.fillRect(bx + bw * 0.48, by + bh * 0.48, bw * 0.14, bh * 0.14);
+        break;
+      }
+      case 'lumberjack_hut': {
+        ctx.fillStyle = '#583101';
+        ctx.fillRect(bx + 4, by + bh * 0.25, bw * 0.52, bh * 0.45);
+        ctx.fillStyle = '#bc6c25';
+        ctx.fillRect(bx + bw * 0.56, by + bh * 0.54, bw * 0.34, bh * 0.12);
+        ctx.fillRect(bx + bw * 0.58, by + bh * 0.42, bw * 0.3, bh * 0.1);
+        break;
+      }
+      case 'sawmill': {
+        ctx.fillStyle = '#7f4f24';
+        ctx.fillRect(bx + 4, by + bh * 0.28, bw * 0.55, bh * 0.48);
+        const angle = bld.status === 'working' ? this.animTime * 3.5 : 0;
+        const wx = bx + bw * 0.68;
+        const wy = by + bh * 0.58;
+        const wr = ts * 0.13;
+        ctx.save();
+        ctx.translate(wx, wy);
+        ctx.rotate(angle);
+        ctx.strokeStyle = isAnachronistic ? '#e9d5ff' : '#cbd5e1';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, wr, 0, Math.PI * 2);
+        ctx.moveTo(-wr, 0);
+        ctx.lineTo(wr, 0);
+        ctx.moveTo(0, -wr);
+        ctx.lineTo(0, wr);
+        ctx.stroke();
+        ctx.restore();
+        break;
+      }
+      case 'fishery': {
+        ctx.fillStyle = '#8d6e63';
+        ctx.fillRect(bx + 2, by + bh * 0.52, bw - 4, bh * 0.32);
+        ctx.fillStyle = '#1d3557';
+        ctx.fillRect(bx + 5, by + bh * 0.2, bw * 0.52, bh * 0.42);
+        break;
+      }
+      case 'wheat_farm': {
+        ctx.fillStyle = '#eab308';
+        for (let r = 0; r < 3; r++) {
+          ctx.fillRect(bx + 4, by + bh * (0.38 + r * 0.16), bw - 8, bh * 0.1);
+        }
+        ctx.fillStyle = '#991b1b';
+        ctx.fillRect(bx + 4, by + 4, bw * 0.42, bh * 0.28);
+        break;
+      }
+      case 'bakery': {
+        ctx.fillStyle = '#9a3412';
+        ctx.fillRect(bx + 5, by + bh * 0.32, bw * 0.56, bh * 0.46);
+        const sailAngle = bld.status === 'working' ? this.animTime * 2.2 : 0.4;
+        const sx = bx + bw * 0.34;
+        const sy = by + bh * 0.36;
+        const sr = ts * 0.17;
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(sailAngle);
+        ctx.strokeStyle = '#fef3c7';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-sr, 0);
+        ctx.lineTo(sr, 0);
+        ctx.moveTo(0, -sr);
+        ctx.lineTo(0, sr);
+        ctx.stroke();
+        ctx.restore();
+        break;
+      }
+      case 'blacksmith': {
+        ctx.fillStyle = '#1f2937';
+        ctx.fillRect(bx + 4, by + bh * 0.26, bw - 8, bh * 0.52);
+        ctx.fillStyle = isAnachronistic ? '#c084fc' : '#f97316';
+        ctx.beginPath();
+        ctx.arc(px + ts * 0.38, py + ts * 0.56, ts * 0.11, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'chronicle_observatory': {
+        ctx.fillStyle = '#3b0764';
+        ctx.fillRect(bx + 4, by + bh * 0.42, bw - 8, bh * 0.38);
+        ctx.fillStyle = '#a855f7';
+        ctx.beginPath();
+        ctx.arc(px + ts * 0.44, py + ts * 0.44, ts * 0.17, Math.PI, 0);
+        ctx.fill();
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  private drawChimneySmoke(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    ts: number,
+    isAnachronistic: boolean
+  ): void {
+    for (let i = 0; i < 2; i++) {
+      const phase = (this.animTime * 0.9 + i * 0.5) % 1;
+      const sx = x + Math.sin(phase * Math.PI * 2) * 3;
+      const sy = y - phase * (ts * 0.22);
+      const alpha = (1 - phase) * 0.5;
+      ctx.fillStyle = isAnachronistic
+        ? `rgba(216, 180, 254, ${alpha})`
+        : `rgba(226, 232, 240, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, ts * (0.05 + phase * 0.05), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  private drawTutorialHighlights(
+    ctx: CanvasRenderingContext2D,
+    state: GameState,
+    ts: number
+  ): void {
+    if (!state.tutorialActive || state.tutorialCompleted) return;
+    const step = TUTORIAL_STEPS[state.tutorialStepIndex];
+    if (!step?.highlightTiles) return;
+
+    const pulse = (Math.sin(this.animTime * 4) + 1) * 0.5;
+
+    for (const target of step.highlightTiles) {
+      const px = this.camera.offsetX + target.x * ts;
+      const py = this.camera.offsetY + target.y * ts;
+
+      ctx.save();
+      ctx.strokeStyle = `rgba(250, 204, 21, ${0.55 + pulse * 0.45})`;
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([5, 3]);
+      ctx.strokeRect(px + 2, py + 2, ts - 4, ts - 4);
+      ctx.restore();
+
+      if (target.label && this.camera.zoom >= 0.75) {
+        ctx.font = 'bold 10px system-ui, sans-serif';
+        const tw = ctx.measureText(target.label).width;
+        const bx = px + ts * 0.5 - (tw + 8) * 0.5;
+        const by = py - 16;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+        ctx.fillRect(bx, by, tw + 8, 14);
+        ctx.fillStyle = '#fde047';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(target.label, px + ts * 0.5, by + 7);
+      }
     }
   }
 

@@ -19,6 +19,11 @@ export function loadGameFromStorage(): GameState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as GameState;
     if (!parsed || !parsed.tiles || !parsed.resources) return null;
+    if (typeof parsed.introSeen !== 'boolean') parsed.introSeen = true;
+    if (typeof parsed.tutorialActive !== 'boolean') parsed.tutorialActive = false;
+    if (typeof parsed.tutorialStepIndex !== 'number') parsed.tutorialStepIndex = 0;
+    if (typeof parsed.tutorialCompleted !== 'boolean') parsed.tutorialCompleted = true;
+    if (typeof parsed.trunksUnsealed !== 'boolean') parsed.trunksUnsealed = true;
     recalculateNetworkAndCapacities(parsed);
     return parsed;
   } catch {

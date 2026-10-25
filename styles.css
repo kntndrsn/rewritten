@@ -182,9 +182,9 @@ body {
 /* Resource Bar */
 .resource-bar {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
-  gap: 4px;
-  padding: 5px 10px;
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+  gap: 3px;
+  padding: 4px 8px;
   background: #0e1726;
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
@@ -196,7 +196,7 @@ body {
   gap: 4px;
   background: rgba(30, 41, 59, 0.75);
   border: 1px solid rgba(148, 163, 184, 0.16);
-  padding: 3px 6px;
+  padding: 2px 5px;
   border-radius: 5px;
   min-width: 0;
 }
@@ -322,13 +322,13 @@ body {
 
 /* Right Sidebar */
 .right-sidebar {
-  width: 275px;
+  width: 245px;
   background: var(--bg-panel);
   border-left: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px;
+  gap: 7px;
+  padding: 7px;
   overflow-y: auto;
   flex-shrink: 0;
 }
@@ -1003,3 +1003,188 @@ body {
   color: var(--text-muted);
   margin-bottom: 3px;
 }
+
+/* Tutorial Walkthrough Card in Sidebar */
+.tutorial-panel {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.96) 0%, rgba(15, 23, 42, 0.96) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.65);
+  border-radius: 8px;
+  padding: 9px 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.tutorial-panel.hidden {
+  display: none;
+}
+
+.tutorial-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.tutorial-step-badge {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  color: #fde047;
+  text-transform: uppercase;
+}
+
+.btn-skip-tutorial {
+  background: rgba(51, 65, 85, 0.8);
+  border: 1px solid var(--border-subtle);
+  color: #cbd5e1;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-skip-tutorial:hover {
+  background: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.tutorial-panel h4 {
+  font-size: 13px;
+  color: #fef3c7;
+  margin-bottom: 4px;
+}
+
+.tutorial-narrative {
+  font-size: 11.5px;
+  color: #cbd5e1;
+  line-height: 1.38;
+  margin-bottom: 8px;
+}
+
+.tutorial-objective-box {
+  background: rgba(30, 41, 59, 0.85);
+  border-left: 3px solid var(--accent-gold);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #f8fafc;
+  margin-bottom: 8px;
+}
+
+.tutorial-actions-row {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-tutorial-action {
+  flex: 1;
+  background: linear-gradient(135deg, #d97706, #f59e0b);
+  color: #0f172a;
+  border: none;
+  padding: 6px 9px;
+  border-radius: 5px;
+  font-weight: 700;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tutorial-dots {
+  display: flex;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.tutorial-dot {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(148, 163, 184, 0.25);
+}
+
+.tutorial-dot.done {
+  background: #22c55e;
+}
+
+.tutorial-dot.current {
+  background: #f59e0b;
+}
+
+/* Narrative Intro Modal */
+.modal-intro-window {
+  max-width: 640px;
+  background: linear-gradient(180deg, #17253d 0%, #0f172a 100%);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+}
+
+.intro-subtitle {
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  color: #c084fc;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+
+.intro-headline {
+  font-size: 20px;
+  color: #fde68a;
+  margin-bottom: 2px;
+}
+
+.intro-dateloc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.intro-story-body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #e2e8f0;
+  margin-bottom: 12px;
+}
+
+.intro-directives {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #cbd5e1;
+}
+
+.intro-buttons-row {
+  display: flex;
+  gap: 10px;
+}
+
+.btn-start-guided {
+  flex: 1.4;
+  background: linear-gradient(135deg, #d97706, #f59e0b);
+  color: #0f172a;
+  border: none;
+  padding: 9px 14px;
+  border-radius: 7px;
+  font-weight: 800;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.btn-skip-intro {
+  flex: 1;
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+  padding: 9px 14px;
+  border-radius: 7px;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+}
+

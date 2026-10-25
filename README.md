@@ -4,9 +4,13 @@
 
 ## Core Features (Vertical Slice Prototype)
 
+- **Narrative Introduction & Skippable 7-Step Tutorial Walkthrough**:
+  - Sets the scene at your May 1607 James River landfall and guides you through establishing basic colonial survival (felling Old-Growth Timber, laying Colonial Cart Roads, casting nets in the Coastal Shallows, sheltering Pioneers, opening a Market Square, and milling Planks) before unsealing the Future Archives.
+  - Can be skipped at any point from either the introduction screen or the in-game walkthrough panel.
 - **Grid-Based Colonial Settlement & Camera**:
-  - Procedural 28×20 coastal and riverine valley map featuring Deep Atlantic Waters, Coastal Shallows, a winding Tidal River, Alluvial Loam floodplains, Old-Growth Timberlands, Granite Outcrops, and Iron Ore Seams.
-  - Smooth pan (`WASD` / Arrow keys / Right-click drag) and cursor-centered zoom (Mouse wheel), plus service-radius overlays and placement validation ghosts.
+  - Procedural 28×20 coastal and riverine valley map featuring Deep Atlantic Waters, Coastal Shallows, a winding Tidal River, sandy shorelines, Alluvial Loam floodplains, Old-Growth Timberlands, Granite Outcrops, and Iron Ore Seams.
+  - Colonial architectural & terrain illustrations inspired by and referencing [unknown-horizons/gfx](https://github.com/unknown-horizons/gfx) (see [`LICENSE`](./LICENSE)).
+  - Smooth pan (`WASD` / Arrow keys / Right-click drag) and cursor-centered zoom (Mouse wheel), plus service-radius overlays, tutorial target beacons, and placement validation ghosts.
 - **Anno-Style Logistics & Production Chains**:
   - Road network flood-fill from your **Temporal Landing & Warehouse**.
   - **Timber** (`Lumberjack Camp`) ➔ **Milled Planks** (`Sawmill`)
@@ -36,3 +40,10 @@ npm test
 # Start local dev server (http://127.0.0.1:5173)
 npm run dev
 ```
+
+## License & Attribution
+
+See [`LICENSE`](./LICENSE) for details:
+- Source code is licensed under the **MIT License**.
+- Colonial building architectures, market stall palettes, and terrain visual designs reference **[unknown-horizons/gfx](https://github.com/unknown-horizons/gfx)** by the Unknown Horizons project and contributors under **CC BY-SA 3.0**.
+

@@ -35,6 +35,7 @@
         <div class="actions-cluster">
           <button id="btn-open-tech" class="action-btn btn-tech">⏳ Future Knowledge</button>
           <button id="btn-open-chronicle" class="action-btn btn-chronicle">📜 Chronicle</button>
+          <button id="btn-open-intro" class="icon-btn" title="Expedition Briefing & Tutorial">📖</button>
           <button id="btn-center-camera" class="icon-btn" title="Center Camera on Landing">🎯</button>
           <button id="btn-save-game" class="icon-btn" title="Save Settlement">💾</button>
           <button id="btn-reset-game" class="icon-btn" title="New 1607 Expedition">🔄</button>
@@ -50,11 +51,13 @@
           <canvas id="game-canvas"></canvas>
           <div id="toast-banner" class="toast-banner"></div>
           <div class="camera-hint">
-            WASD / Arrows or Right-Drag to Pan • Scroll to Zoom • Right-Click / Esc to Cancel Build
+            WASD / Right-Drag: Pan • Scroll: Zoom • Right-Click / Esc: Cancel
           </div>
         </div>
 
         <aside class="right-sidebar">
+          <div id="tutorial-panel" class="tutorial-panel hidden"></div>
+
           <div class="panel-card inspector-card">
             <h3>Tile & Structure Inspector</h3>
             <div id="inspector-content"></div>
@@ -124,6 +127,13 @@
           Famines and plagues that once doomed the early colonies have been conquered, and a new timeline has taken root!
         </p>
         <button id="btn-dismiss-victory" class="btn-primary">Continue Governing Your Colony</button>
+      </div>
+    </div>
+
+    <!-- Narrative Introduction & Expedition Briefing Modal -->
+    <div id="modal-intro" class="modal-backdrop hidden">
+      <div class="modal-window modal-intro-window">
+        <div id="intro-modal-body"></div>
       </div>
     </div>
 

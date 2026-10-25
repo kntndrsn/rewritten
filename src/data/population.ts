@@ -5,15 +5,15 @@ export const POPULATION_TIERS: Record<PopulationTierId, PopulationTierDefinition
     id: 'pioneers',
     name: 'Pioneers',
     badge: '⛺',
-    taxPer10PopPerMin: 12,
-    insightPer10PopPerMin: 0.6,
+    taxPer10PopPerMin: 9,
+    insightPer10PopPerMin: 0.35,
     description: 'Hardworking early settlers who felled the first trees. Require Fish and a nearby Market Square to thrive and upgrade.',
     needs: [
       {
         id: 'need_fish',
         label: 'Salted Fish',
         resource: 'fish',
-        consumptionPer10PopPerMin: 1.5,
+        consumptionPer10PopPerMin: 0.9,
         happinessWeight: 55,
         requiredForUpgrade: true
       },
@@ -30,15 +30,15 @@ export const POPULATION_TIERS: Record<PopulationTierId, PopulationTierDefinition
     id: 'colonists',
     name: 'Colonists',
     badge: '🏘️',
-    taxPer10PopPerMin: 26,
-    insightPer10PopPerMin: 1.6,
+    taxPer10PopPerMin: 20,
+    insightPer10PopPerMin: 1.1,
     description: 'Skilled artisans and farmers who staff advanced workshops. Demand Bread, Tools, and Sanitation to join the Enlightened.',
     needs: [
       {
         id: 'need_fish',
         label: 'Salted Fish',
         resource: 'fish',
-        consumptionPer10PopPerMin: 1.2,
+        consumptionPer10PopPerMin: 0.7,
         happinessWeight: 20,
         requiredForUpgrade: true
       },
@@ -46,7 +46,7 @@ export const POPULATION_TIERS: Record<PopulationTierId, PopulationTierDefinition
         id: 'need_bread',
         label: 'Artisan Bread',
         resource: 'bread',
-        consumptionPer10PopPerMin: 1.4,
+        consumptionPer10PopPerMin: 0.8,
         happinessWeight: 30,
         requiredForUpgrade: true
       },
@@ -54,7 +54,7 @@ export const POPULATION_TIERS: Record<PopulationTierId, PopulationTierDefinition
         id: 'need_tools',
         label: 'Precision Tools',
         resource: 'tools',
-        consumptionPer10PopPerMin: 0.7,
+        consumptionPer10PopPerMin: 0.45,
         happinessWeight: 25,
         requiredForUpgrade: true
       },
@@ -78,15 +78,15 @@ export const POPULATION_TIERS: Record<PopulationTierId, PopulationTierDefinition
     id: 'innovators',
     name: 'Innovators',
     badge: '🔭',
-    taxPer10PopPerMin: 48,
-    insightPer10PopPerMin: 4.2,
+    taxPer10PopPerMin: 38,
+    insightPer10PopPerMin: 2.8,
     description: 'Colonial thinkers educated in your future scientific principles. Generate substantial Silver and Future Insight.',
     needs: [
       {
         id: 'need_bread',
         label: 'Artisan Bread',
         resource: 'bread',
-        consumptionPer10PopPerMin: 1.5,
+        consumptionPer10PopPerMin: 0.9,
         happinessWeight: 25,
         requiredForUpgrade: false
       },
@@ -94,7 +94,7 @@ export const POPULATION_TIERS: Record<PopulationTierId, PopulationTierDefinition
         id: 'need_tools',
         label: 'Precision Tools',
         resource: 'tools',
-        consumptionPer10PopPerMin: 0.9,
+        consumptionPer10PopPerMin: 0.55,
         happinessWeight: 20,
         requiredForUpgrade: false
       },
@@ -102,7 +102,7 @@ export const POPULATION_TIERS: Record<PopulationTierId, PopulationTierDefinition
         id: 'need_medicine',
         label: 'Antiseptic Tonics',
         resource: 'medicine',
-        consumptionPer10PopPerMin: 0.8,
+        consumptionPer10PopPerMin: 0.5,
         happinessWeight: 25,
         requiredForUpgrade: false
       },
