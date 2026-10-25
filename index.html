@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Rewritten — Colonial Time-Travel Settlement Builder</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -35,7 +35,9 @@
         <div class="actions-cluster">
           <button id="btn-open-tech" class="action-btn btn-tech">⏳ Future Knowledge</button>
           <button id="btn-open-chronicle" class="action-btn btn-chronicle">📜 Chronicle</button>
-          <button id="btn-open-intro" class="icon-btn" title="Expedition Briefing & Tutorial">📖</button>
+          <button id="btn-toggle-guide" class="icon-btn" title="Toggle Expedition Guide">🧭</button>
+          <button id="btn-toggle-sidebar" class="icon-btn mobile-only-btn" title="Toggle Inspector Panel">📋</button>
+          <button id="btn-open-intro" class="icon-btn" title="View Expedition Story Briefing">📖</button>
           <button id="btn-center-camera" class="icon-btn" title="Center Camera on Landing">🎯</button>
           <button id="btn-save-game" class="icon-btn" title="Save Settlement">💾</button>
           <button id="btn-reset-game" class="icon-btn" title="New 1607 Expedition">🔄</button>
@@ -49,13 +51,18 @@
       <div class="main-stage">
         <div class="canvas-viewport">
           <canvas id="game-canvas"></canvas>
+          <div id="mobile-tutorial-bar" class="mobile-tutorial-bar hidden"></div>
           <div id="toast-banner" class="toast-banner"></div>
           <div class="camera-hint">
-            WASD / Right-Drag: Pan • Scroll: Zoom • Right-Click / Esc: Cancel
+            Drag / WASD: Pan • Pinch / Scroll: Zoom • Tap / Click: Build & Inspect
           </div>
         </div>
 
-        <aside class="right-sidebar">
+        <aside id="right-sidebar" class="right-sidebar">
+          <div class="mobile-sidebar-header">
+            <span>Inspector & Colony Guide</span>
+            <button id="btn-close-sidebar" type="button" class="btn-skip-tutorial">✕ Close</button>
+          </div>
           <div id="tutorial-panel" class="tutorial-panel hidden"></div>
 
           <div class="panel-card inspector-card">

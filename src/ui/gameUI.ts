@@ -10,23 +10,26 @@ import {
   type GameState,
   type PlacedBuilding,
   WIN_CONDITIONS,
-  advanceTutorialManually,
   canAffordEventChoice,
   canPlaceBuilding,
   canUnlockTech,
   canUpgradeHouse,
   demolishTile,
+  dismissTutorial,
   getColonialYearString,
+  getDynamicTutorialTargets,
+  getEffectiveBuildingCost,
   getEffectiveEventChoiceCost,
   getTile,
   hasEnoughResources,
+  isTutorialStepSatisfied,
   placeBuilding,
   resolveHistoricalEvent,
   setBuildingRecipe,
-  skipTutorial,
+  stepTutorial,
   toggleBuildingPaused,
+  toggleTutorial,
   unlockTech,
-  unsealFutureTrunks,
   upgradeHouse
 } from '../core/simulation.ts';
 import { clearSavedGame, saveGameToStorage } from '../core/storage.ts';
@@ -110,6 +113,26 @@ export class GameUI {
       this.openModal(this.activeModal === 'chronicle' ? null : 'chronicle');
     });
 
+    document.getElementById('btn-toggle-guide')?.addEventListener('click', () => {
+      const isNowActive = toggleTutorial(this.state);
+      this.renderTutorialPanel();
+      this.updateHUD();
+      this.showToast(
+        isNowActive ? 'Expedition Guide opened.' : 'Expedition Guide dismissed.',
+        'info'
+      );
+    });
+
+    document.getElementById('btn-toggle-sidebar')?.addEventListener('click', () => {
+      const sb = document.getElementById('right-sidebar');
+      sb?.classList.toggle('mobile-open');
+    });
+
+    document.getElementById('btn-close-sidebar')?.addEventListener('click', () => {
+      const sb = document.getElementById('right-sidebar');
+      sb?.classList.remove('mobile-open');
+    });
+
     document.getElementById('btn-open-intro')?.addEventListener('click', () => {
       this.renderIntroModal(true);
     });
@@ -191,14 +214,15 @@ export class GameUI {
         const res = placeBuilding(this.state, defId, x, y);
         if (res.success) {
           const def = BUILDINGS[defId];
-          this.showToast(`Constructed ${def.name} at (${x}, ${y}).`, 'success');
+          this.showToast(`Constructed ${def.name}.`, 'success');
           this.renderer.selectedTile = { x, y };
-          // Keep road or housing tool active for easy placement; switch to select if insufficient funds
-          if (!canPlaceBuilding(this.state, defId, x, y).valid && !def.isRoad) {
-            // Stay in build mode so player can place more if they have resources
+          // After placing the first free Temporal Landing, switch back to select or next tutorial tool
+          if (defId === 'founding_camp') {
+            this.renderer.tool = { mode: 'select' };
           }
           this.renderBuildToolbar();
-          this.renderInspector();
+          this.renderInspector(true);
+          this.renderTutorialPanel();
           this.updateHUD();
         } else if (res.reason) {
           this.showToast(res.reason, 'warn');
@@ -208,7 +232,11 @@ export class GameUI {
 
       // Select mode
       this.renderer.selectedTile = { x, y };
-      this.renderInspector();
+      this.renderInspector(true);
+      const clickedTile = getTile(this.state, x, y);
+      if (window.innerWidth <= 768 && clickedTile?.buildingId) {
+        document.getElementById('right-sidebar')?.classList.add('mobile-open');
+      }
     });
 
     // Keyboard shortcuts (Escape cancels build/demolish or closes modal, Space toggles pause)
@@ -287,10 +315,12 @@ export class GameUI {
           <div class="res-pill ${resId === 'insight' ? 'res-insight' : resId === 'coin' ? 'res-coin' : ''}" title="${def.name}: ${def.description}">
             <span class="res-icon">${def.icon}</span>
             <div class="res-vals">
-              <span class="res-name">${def.shortName}</span>
+              <div class="res-top-line">
+                <span class="res-name">${def.shortName}</span>
+                <span class="res-rate ${rateClass}">${rateSign}${rate.toFixed(1)}/m</span>
+              </div>
               <span class="res-amount">${amount}<small>${capText}</small></span>
             </div>
-            <span class="res-rate ${rateClass}">${rateSign}${rate.toFixed(1)}/m</span>
           </div>
         `;
       }).join('');
@@ -387,17 +417,22 @@ export class GameUI {
       .map((def) => {
         const isLocked =
           Boolean(def.requiredTechId) && !this.state.unlockedTechIds.includes(def.requiredTechId!);
-        const canAfford = hasEnoughResources(this.state, def.cost).ok;
+        const effectiveCost = getEffectiveBuildingCost(this.state, def.id) ?? {};
+        const canAfford = hasEnoughResources(this.state, effectiveCost).ok;
         const isSelected =
           this.renderer.tool.mode === 'build' && this.renderer.tool.defId === def.id;
 
-        const costBadges = (Object.entries(def.cost) as Array<[ResourceId, number]>)
-          .map(([resId, amt]) => {
-            const rDef = RESOURCES[resId];
-            const enough = this.state.resources[resId] >= amt;
-            return `<span class="cost-tag ${enough ? '' : 'cost-short'}">${rDef.icon}${amt}</span>`;
-          })
-          .join('');
+        const costEntries = Object.entries(effectiveCost) as Array<[ResourceId, number]>;
+        const costBadges =
+          costEntries.length === 0
+            ? `<span class="cost-tag" style="color:#4ade80;font-weight:700;">✨ FREE (First Landing)</span>`
+            : costEntries
+                .map(([resId, amt]) => {
+                  const rDef = RESOURCES[resId];
+                  const enough = this.state.resources[resId] >= amt;
+                  return `<span class="cost-tag ${enough ? '' : 'cost-short'}">${rDef.icon}${amt}</span>`;
+                })
+                .join('');
 
         const lockLabel = isLocked
           ? `<div class="lock-banner">🔒 Unlock via ${TECHNOLOGIES[def.requiredTechId!]?.name ?? 'Future Knowledge'}</div>`
@@ -471,7 +506,8 @@ export class GameUI {
 
     const tDef = TERRAINS[tile.terrain];
     const bld = tile.buildingId ? this.state.buildings[tile.buildingId] : undefined;
-    const nextKey = `${sel.x},${sel.y}:${bld?.id ?? 'empty'}:${bld?.defId ?? ''}:${this.state.unlockedTechIds.join(',')}`;
+    const isConstructed = bld ? bld.isConstructed !== false : true;
+    const nextKey = `${sel.x},${sel.y}:${bld?.id ?? 'empty'}:${bld?.defId ?? ''}:${isConstructed}:${this.state.unlockedTechIds.join(',')}`;
 
     if (!forceRebuild && this.renderedInspectorKey === nextKey) {
       if (bld) {
@@ -502,9 +538,28 @@ export class GameUI {
     const def = BUILDINGS[bld.defId];
     const stInfo = this.getStatusDisplay(bld.status);
 
+    let constructionHtml = '';
+    if (bld.isConstructed === false) {
+      const cPct = Math.min(
+        100,
+        Math.round(((bld.constructionProgressSeconds || 0) / (bld.buildTimeSeconds || 5)) * 100)
+      );
+      constructionHtml = `
+        <div class="inspector-box">
+          <div class="box-row">
+            <span>Construction Progress:</span>
+            <strong id="insp-construction-val">${cPct}% (${(bld.constructionProgressSeconds || 0).toFixed(1)}s / ${bld.buildTimeSeconds || 5}s)</strong>
+          </div>
+          <div class="progress-bar-outer">
+            <div id="insp-construction-bar" class="progress-bar-inner" style="width: ${cPct}%"></div>
+          </div>
+        </div>
+      `;
+    }
+
     // Housing Inspector Block
     let housingHtml = '';
-    if (def.housing) {
+    if (def.housing && bld.isConstructed !== false) {
       const tierDef = POPULATION_TIERS[def.housing.tier];
       const upgCheck = canUpgradeHouse(this.state, bld.id);
       const nextDef = def.housing.upgradesToBuildingId
@@ -563,7 +618,7 @@ export class GameUI {
 
     // Production Recipes Block
     let recipesHtml = '';
-    if (def.recipes && def.recipes.length > 0) {
+    if (def.recipes && def.recipes.length > 0 && bld.isConstructed !== false) {
       const activeRecipe =
         def.recipes.find((r) => r.id === bld.activeRecipeId) ?? def.recipes[0];
       const pct = Math.min(100, Math.round((bld.progressSeconds / activeRecipe.cycleSeconds) * 100));
@@ -630,6 +685,7 @@ export class GameUI {
           ${def.passiveInsightPerMin ? `<div><span>Insight:</span> <strong>⏳ +${def.passiveInsightPerMin}/m</strong></div>` : ''}
           ${def.serviceRadius ? `<div><span>Service Radius:</span> <strong>${def.serviceRadius} tiles</strong></div>` : ''}
         </div>
+        ${constructionHtml}
         ${housingHtml}
         ${recipesHtml}
         <div class="inspector-actions">
@@ -702,8 +758,10 @@ export class GameUI {
 
   private getStatusDisplay(status: string): { label: string; cls: string } {
     const statusMap: Record<string, { label: string; cls: string }> = {
+      constructing: { label: '🔨 Under Construction...', cls: 'status-warn' },
       working: { label: '⚡ Operating Normally', cls: 'status-ok' },
       no_road: { label: '⚠️ Disconnected from Road/Warehouse', cls: 'status-err' },
+      no_workers: { label: '👷 No Workforce — Build Pioneer Cabins!', cls: 'status-err' },
       missing_inputs: { label: '⏳ Waiting for Input Materials', cls: 'status-warn' },
       storage_full: { label: '📦 Warehouse Storage Full', cls: 'status-warn' },
       paused: { label: '⏸ Production Paused', cls: 'status-warn' },
@@ -722,6 +780,22 @@ export class GameUI {
       const stInfo = this.getStatusDisplay(bld.status);
       statusPill.className = `status-pill ${stInfo.cls}`;
       statusPill.textContent = stInfo.label;
+    }
+
+    if (bld.isConstructed === false) {
+      const cPct = Math.min(
+        100,
+        Math.round(((bld.constructionProgressSeconds || 0) / (bld.buildTimeSeconds || 5)) * 100)
+      );
+      const cVal = document.getElementById('insp-construction-val');
+      if (cVal) {
+        cVal.textContent = `${cPct}% (${(bld.constructionProgressSeconds || 0).toFixed(1)}s / ${bld.buildTimeSeconds || 5}s)`;
+      }
+      const cBar = document.getElementById('insp-construction-bar');
+      if (cBar) {
+        cBar.style.width = `${cPct}%`;
+      }
+      return;
     }
 
     if (def.housing) {
@@ -808,6 +882,8 @@ export class GameUI {
       Math.round((this.state.populationByTier.innovators / WIN_CONDITIONS.minInnovators) * 100)
     );
 
+    const milestonesDone = this.state.achievedMilestoneIds?.length ?? 0;
+
     el.innerHTML = `
       <h4>Settlement & Timeline</h4>
       <div class="tiers-summary">${tiersHtml}</div>
@@ -824,6 +900,12 @@ export class GameUI {
           <div class="goal-label"><span>Enlightened Innovators</span><strong>${this.state.populationByTier.innovators}/${WIN_CONDITIONS.minInnovators}</strong></div>
           <div class="mini-bar"><div class="bar-gold" style="width:${innProgress}%"></div></div>
         </div>
+      </div>
+      <div class="insight-guide-box">
+        <strong>⏳ How to Earn Future Insight:</strong><br/>
+        • Build <strong>🔭 Time Traveler’s Academy</strong> (+3/m passive + compiles Field Notes for +3 Insight every 15s)<br/>
+        • Upgrade houses to <strong>Colonists</strong> & <strong>Innovators</strong><br/>
+        • Colonial Milestones (+8 Insight each): <strong>${milestonesDone}/4</strong> completed
       </div>
     `;
   }
@@ -1068,64 +1150,88 @@ export class GameUI {
         ${INTRO_STORY.directives.map((d) => `<div>${d}</div>`).join('')}
       </div>
       <div class="intro-buttons-row">
-        <button id="btn-start-guided" class="btn-start-guided">
-          🧭 Begin Guided Expedition (Tutorial)
+        <button id="btn-start-guided" type="button" class="btn-start-guided">
+          🧭 Begin Guided Expedition
         </button>
-        <button id="btn-skip-intro" class="btn-skip-intro">
-          ⏭ Skip Intro & Tutorial
+        <button id="btn-skip-intro" type="button" class="btn-skip-intro">
+          Dismiss Briefing
         </button>
       </div>
     `;
 
+    const hasWarehouse = Object.values(this.state.buildings).some(
+      (b) => b.defId === 'founding_camp'
+    );
+
     document.getElementById('btn-start-guided')?.addEventListener('click', () => {
       this.state.introSeen = true;
       this.state.tutorialActive = true;
-      this.state.tutorialCompleted = false;
       if (this.state.tutorialStepIndex >= TUTORIAL_STEPS.length) {
         this.state.tutorialStepIndex = 0;
       }
       this.state.speed = 1;
+      if (!hasWarehouse) {
+        this.renderer.tool = { mode: 'build', defId: 'founding_camp' };
+      }
       modal.classList.add('hidden');
+      this.renderBuildToolbar();
       this.renderTutorialPanel();
       this.updateHUD();
-      this.showToast('Guided Expedition started. Follow the steps in the top-left panel!', 'info');
+      this.showToast(
+        hasWarehouse
+          ? 'Expedition Guide active. Use ◀ / ▶ to browse steps or Dismiss anytime.'
+          : 'Choose where on the map to place your free Temporal Landing & Warehouse!',
+        'info'
+      );
     });
 
     document.getElementById('btn-skip-intro')?.addEventListener('click', () => {
-      skipTutorial(this.state);
-      unsealFutureTrunks(this.state);
+      dismissTutorial(this.state);
       this.state.speed = 1;
+      if (!hasWarehouse) {
+        this.renderer.tool = { mode: 'build', defId: 'founding_camp' };
+      }
       modal.classList.add('hidden');
+      this.renderBuildToolbar();
       this.renderTutorialPanel();
       this.updateHUD();
-      this.showToast('Tutorial skipped. Expedition trunks unsealed (+20 Future Insight).', 'info');
+      this.showToast(
+        hasWarehouse
+          ? 'Briefing dismissed. Toggle the Expedition Guide anytime with 🧭.'
+          : 'Place your free Temporal Landing & Warehouse on any meadow tile to begin!',
+        'info'
+      );
     });
   }
 
   public renderTutorialPanel(): void {
     const panel = document.getElementById('tutorial-panel');
+    const mobileBar = document.getElementById('mobile-tutorial-bar');
     if (!panel) return;
 
-    if (!this.state.tutorialActive || this.state.tutorialCompleted) {
+    if (!this.state.tutorialActive) {
       panel.classList.add('hidden');
+      mobileBar?.classList.add('hidden');
       return;
     }
 
     const step = TUTORIAL_STEPS[this.state.tutorialStepIndex];
     if (!step) {
       panel.classList.add('hidden');
+      mobileBar?.classList.add('hidden');
       return;
     }
 
     panel.classList.remove('hidden');
+    mobileBar?.classList.remove('hidden');
+
+    const stepDone = isTutorialStepSatisfied(this.state, step.id);
+    const canPrev = this.state.tutorialStepIndex > 0;
+    const canNext = this.state.tutorialStepIndex < TUTORIAL_STEPS.length - 1;
 
     const dotsHtml = TUTORIAL_STEPS.map((s, idx) => {
-      const cls =
-        idx < this.state.tutorialStepIndex
-          ? 'done'
-          : idx === this.state.tutorialStepIndex
-            ? 'current'
-            : '';
+      const done = isTutorialStepSatisfied(this.state, s.id);
+      const cls = idx === this.state.tutorialStepIndex ? 'current' : done ? 'done' : '';
       return `<div class="tutorial-dot ${cls}" title="${s.title}"></div>`;
     }).join('');
 
@@ -1133,28 +1239,22 @@ export class GameUI {
     if (step.recommendedBuildDefId) {
       const bDef = BUILDINGS[step.recommendedBuildDefId];
       primaryBtnHtml = `
-        <button id="btn-tutorial-select-build" class="btn-tutorial-action">
-          🔨 Select ${bDef.icon} ${bDef.name}
-        </button>
-      `;
-    } else if (step.allowManualAdvance) {
-      primaryBtnHtml = `
-        <button id="btn-tutorial-next" class="btn-tutorial-action">
-          ✓ Complete Step & Continue
+        <button type="button" data-tutorial-select-build class="btn-tutorial-action">
+          ${bDef.icon} Select ${bDef.name}
         </button>
       `;
     } else if (step.id === 'unseal_future_knowledge') {
       primaryBtnHtml = `
-        <button id="btn-tutorial-open-tech" class="btn-tutorial-action">
-          ⏳ Open Future Knowledge
+        <button type="button" data-tutorial-open-tech class="btn-tutorial-action">
+          ⏳ Future Knowledge
         </button>
       `;
     }
 
     panel.innerHTML = `
       <div class="tutorial-top-bar">
-        <span class="tutorial-step-badge">🧭 Walkthrough • Step ${step.index + 1} of ${TUTORIAL_STEPS.length}</span>
-        <button id="btn-tutorial-skip" class="btn-skip-tutorial" title="Skip Tutorial at any time">Skip Tutorial ✕</button>
+        <span class="tutorial-step-badge">🧭 Guide • ${step.index + 1}/${TUTORIAL_STEPS.length} ${stepDone ? '✓' : ''}</span>
+        <button type="button" data-tutorial-dismiss class="btn-skip-tutorial" title="Hide Guide (reopen anytime with 🧭)">Dismiss ✕</button>
       </div>
       <h4>${step.title}</h4>
       <p class="tutorial-narrative">${step.narrative}</p>
@@ -1162,38 +1262,74 @@ export class GameUI {
         <strong>Objective:</strong> ${step.objectiveText}
       </div>
       <div class="tutorial-actions-row">
+        <button type="button" data-tutorial-prev class="btn-tutorial-nav" ${canPrev ? '' : 'disabled'} title="Previous Step">◀ Back</button>
         ${primaryBtnHtml}
+        <button type="button" data-tutorial-next class="btn-tutorial-nav" ${canNext ? '' : 'disabled'} title="Next Step">Next ▶</button>
       </div>
       <div class="tutorial-dots">${dotsHtml}</div>
     `;
 
-    document.getElementById('btn-tutorial-skip')?.addEventListener('click', () => {
-      skipTutorial(this.state);
-      unsealFutureTrunks(this.state);
-      this.renderTutorialPanel();
-      this.updateHUD();
-      this.showToast('Tutorial skipped. You have full command of the colony!', 'info');
+    if (mobileBar) {
+      mobileBar.innerHTML = `
+        <div class="tutorial-top-bar">
+          <span class="tutorial-step-badge">🧭 ${step.index + 1}/${TUTORIAL_STEPS.length}: ${step.title} ${stepDone ? '✓' : ''}</span>
+          <button type="button" data-tutorial-dismiss class="btn-skip-tutorial">Dismiss ✕</button>
+        </div>
+        <div style="color:#e2e8f0;font-size:10.5px;margin-bottom:3px;">${step.objectiveText}</div>
+        <div class="tutorial-actions-row">
+          <button type="button" data-tutorial-prev class="btn-tutorial-nav" ${canPrev ? '' : 'disabled'}>◀</button>
+          ${primaryBtnHtml}
+          <button type="button" data-tutorial-next class="btn-tutorial-nav" ${canNext ? '' : 'disabled'}>▶</button>
+        </div>
+      `;
+    }
+
+    document.querySelectorAll('[data-tutorial-dismiss]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        dismissTutorial(this.state);
+        this.renderTutorialPanel();
+        this.updateHUD();
+        this.showToast('Expedition Guide hidden. Tap 🧭 in the top bar anytime to reopen.', 'info');
+      });
     });
 
-    document.getElementById('btn-tutorial-select-build')?.addEventListener('click', () => {
-      if (!step.recommendedBuildDefId) return;
-      this.renderer.tool = { mode: 'build', defId: step.recommendedBuildDefId };
-      if (step.highlightTiles && step.highlightTiles.length > 0) {
-        const t = step.highlightTiles[0];
-        this.renderer.centerOnTile(t.x, t.y);
-      }
-      this.renderBuildToolbar();
-      this.showToast(`Selected ${BUILDINGS[step.recommendedBuildDefId].name}. Click a highlighted tile on the map!`, 'info');
+    document.querySelectorAll('[data-tutorial-prev]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        stepTutorial(this.state, -1);
+        this.lastTutorialStepIndex = this.state.tutorialStepIndex;
+        this.renderTutorialPanel();
+      });
     });
 
-    document.getElementById('btn-tutorial-next')?.addEventListener('click', () => {
-      advanceTutorialManually(this.state);
-      this.renderTutorialPanel();
-      this.updateHUD();
+    document.querySelectorAll('[data-tutorial-next]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        stepTutorial(this.state, 1);
+        this.lastTutorialStepIndex = this.state.tutorialStepIndex;
+        this.renderTutorialPanel();
+      });
     });
 
-    document.getElementById('btn-tutorial-open-tech')?.addEventListener('click', () => {
-      this.openModal('tech');
+    document.querySelectorAll('[data-tutorial-select-build]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (!step.recommendedBuildDefId) return;
+        this.renderer.tool = { mode: 'build', defId: step.recommendedBuildDefId };
+        const dynamicTargets = getDynamicTutorialTargets(this.state, step);
+        if (dynamicTargets.length > 0) {
+          const t = dynamicTargets[0];
+          this.renderer.centerOnTile(t.x, t.y);
+        }
+        this.renderBuildToolbar();
+        this.showToast(
+          `Selected ${BUILDINGS[step.recommendedBuildDefId].name}. Tap a highlighted tile on the map!`,
+          'info'
+        );
+      });
+    });
+
+    document.querySelectorAll('[data-tutorial-open-tech]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.openModal('tech');
+      });
     });
   }
 }

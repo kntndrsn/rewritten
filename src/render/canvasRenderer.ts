@@ -6,6 +6,7 @@ import {
   type PlacedBuilding,
   canPlaceBuilding,
   canUpgradeHouse,
+  getDynamicTutorialTargets,
   getOrthogonalNeighbors,
   getTile
 } from '../core/simulation.ts';
@@ -37,6 +38,11 @@ export class CanvasRenderer {
   private downClientY = 0;
   private panStartX = 0;
   private panStartY = 0;
+  private isTouchPanning = false;
+  private touchMoved = false;
+  private touchStartX = 0;
+  private touchStartY = 0;
+  private lastPinchDist = 0;
   private keysPressed = new Set<string>();
   private animTime = 0;
 
@@ -171,6 +177,87 @@ export class CanvasRenderer {
         this.camera.zoom = nextZoom;
         this.camera.offsetX = mouseX - worldX * nextZoom;
         this.camera.offsetY = mouseY - worldY * nextZoom;
+      },
+      { passive: false }
+    );
+
+    // Mobile & Touch Gestures (1-finger pan/tap, 2-finger pinch-zoom)
+    this.canvas.addEventListener(
+      'touchstart',
+      (e) => {
+        if (e.touches.length === 1) {
+          const t = e.touches[0];
+          this.isTouchPanning = true;
+          this.touchMoved = false;
+          this.touchStartX = t.clientX;
+          this.touchStartY = t.clientY;
+          this.panStartX = t.clientX - this.camera.offsetX;
+          this.panStartY = t.clientY - this.camera.offsetY;
+          this.hoveredTile = this.screenToTile(t.clientX, t.clientY);
+        } else if (e.touches.length === 2) {
+          this.isTouchPanning = false;
+          this.touchMoved = true;
+          const t1 = e.touches[0];
+          const t2 = e.touches[1];
+          this.lastPinchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        }
+      },
+      { passive: true }
+    );
+
+    this.canvas.addEventListener(
+      'touchmove',
+      (e) => {
+        e.preventDefault();
+        if (e.touches.length === 1 && this.isTouchPanning) {
+          const t = e.touches[0];
+          if (Math.hypot(t.clientX - this.touchStartX, t.clientY - this.touchStartY) > 6) {
+            this.touchMoved = true;
+          }
+          if (this.touchMoved) {
+            this.camera.offsetX = t.clientX - this.panStartX;
+            this.camera.offsetY = t.clientY - this.panStartY;
+          }
+        } else if (e.touches.length === 2) {
+          const t1 = e.touches[0];
+          const t2 = e.touches[1];
+          const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+          if (this.lastPinchDist > 10 && dist > 10) {
+            const rect = this.canvas.getBoundingClientRect();
+            const midX = (t1.clientX + t2.clientX) / 2 - rect.left;
+            const midY = (t1.clientY + t2.clientY) / 2 - rect.top;
+            const prevZoom = this.camera.zoom;
+            const nextZoom = Math.max(0.55, Math.min(1.85, prevZoom * (dist / this.lastPinchDist)));
+            const worldX = (midX - this.camera.offsetX) / prevZoom;
+            const worldY = (midY - this.camera.offsetY) / prevZoom;
+            this.camera.zoom = nextZoom;
+            this.camera.offsetX = midX - worldX * nextZoom;
+            this.camera.offsetY = midY - worldY * nextZoom;
+          }
+          this.lastPinchDist = dist;
+        }
+      },
+      { passive: false }
+    );
+
+    this.canvas.addEventListener(
+      'touchend',
+      (e) => {
+        if (!this.touchMoved && e.changedTouches.length === 1) {
+          if (e.cancelable) {
+            e.preventDefault();
+          }
+          const t = e.changedTouches[0];
+          const coords = this.screenToTile(t.clientX, t.clientY);
+          this.hoveredTile = coords;
+          if (coords && this.onTileClickCallback) {
+            this.onTileClickCallback(coords.x, coords.y, 0);
+          }
+        }
+        if (e.touches.length === 0) {
+          this.isTouchPanning = false;
+          this.lastPinchDist = 0;
+        }
       },
       { passive: false }
     );
@@ -449,6 +536,16 @@ export class CanvasRenderer {
 
     if (def.isRoad) {
       this.drawRoadTile(ctx, state, bld.x, bld.y, px, py, ts);
+      if (bld.isConstructed === false) {
+        const ratio = Math.min(
+          1,
+          Math.max(0, (bld.constructionProgressSeconds || 0) / (bld.buildTimeSeconds || 1.5))
+        );
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(px + 6, py + ts - 8, ts - 12, 4);
+        ctx.fillStyle = '#fbbf24';
+        ctx.fillRect(px + 6, py + ts - 8, (ts - 12) * ratio, 4);
+      }
       return;
     }
 
@@ -457,6 +554,45 @@ export class CanvasRenderer {
     const by = py + pad;
     const bw = ts - pad * 2;
     const bh = ts - pad * 2;
+
+    if (bld.isConstructed === false) {
+      const ratio = Math.min(
+        1,
+        Math.max(0, (bld.constructionProgressSeconds || 0) / (bld.buildTimeSeconds || 5))
+      );
+      ctx.fillStyle = 'rgba(30, 41, 59, 0.76)';
+      ctx.fillRect(bx, by, bw, bh);
+
+      ctx.strokeStyle = '#d97706';
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.setLineDash([]);
+
+      ctx.strokeStyle = 'rgba(217, 119, 6, 0.45)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(bx + 3, by + 3);
+      ctx.lineTo(bx + bw - 3, by + bh - 10);
+      ctx.moveTo(bx + bw - 3, by + 3);
+      ctx.lineTo(bx + 3, by + bh - 10);
+      ctx.stroke();
+
+      ctx.font = `${Math.floor(ts * 0.32)}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.fillText(def.icon, px + ts * 0.5, py + ts * 0.42);
+
+      const barX = bx + 3;
+      const barY = by + bh - 7;
+      const barW = bw - 6;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(barX, barY, barW, 5);
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillRect(barX, barY, barW * ratio, 5);
+      return;
+    }
 
     // Drop shadow
     ctx.fillStyle = 'rgba(0, 0, 0, 0.36)';
@@ -530,8 +666,13 @@ export class CanvasRenderer {
       }
     }
 
-    // Status warning badge (no road, missing inputs, paused)
-    if (bld.status === 'no_road' || bld.status === 'missing_inputs' || bld.status === 'paused') {
+    // Status warning badge (no road, no workers, missing inputs, paused)
+    if (
+      bld.status === 'no_road' ||
+      bld.status === 'no_workers' ||
+      bld.status === 'missing_inputs' ||
+      bld.status === 'paused'
+    ) {
       ctx.fillStyle = bld.status === 'paused' ? '#64748b' : '#ef4444';
       ctx.beginPath();
       ctx.arc(px + pad + 5, py + pad + 5, ts * 0.12, 0, Math.PI * 2);
@@ -736,13 +877,15 @@ export class CanvasRenderer {
     state: GameState,
     ts: number
   ): void {
-    if (!state.tutorialActive || state.tutorialCompleted) return;
+    if (!state.tutorialActive) return;
     const step = TUTORIAL_STEPS[state.tutorialStepIndex];
-    if (!step?.highlightTiles) return;
+    if (!step) return;
+    const targets = getDynamicTutorialTargets(state, step);
+    if (targets.length === 0) return;
 
     const pulse = (Math.sin(this.animTime * 4) + 1) * 0.5;
 
-    for (const target of step.highlightTiles) {
+    for (const target of targets) {
       const px = this.camera.offsetX + target.x * ts;
       const py = this.camera.offsetY + target.y * ts;
 

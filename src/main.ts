@@ -18,16 +18,16 @@ function bootstrap(): void {
     throw new Error('#game-canvas element not found');
   }
 
-  let state: GameState = loadGameFromStorage() ?? createInitialGameState(1607, true);
+  let state: GameState = loadGameFromStorage() ?? createInitialGameState(1607, false);
   const renderer = new CanvasRenderer(canvas);
   renderer.centerOnTile(8, 8);
 
   const resetGame = () => {
-    state = createInitialGameState(1607, true);
+    state = createInitialGameState(1607, false);
     ui.setState(state);
     renderer.selectedTile = { x: 7, y: 8 };
     renderer.centerOnTile(8, 8);
-    ui.renderInspector();
+    ui.renderInspector(true);
   };
 
   const ui = new GameUI(state, renderer, resetGame);
