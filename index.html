@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rewritten — Colonial Time-Travel Settlement Builder</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app-shell">
+      <!-- Top HUD Bar -->
+      <header class="top-hud">
+        <div class="brand-cluster">
+          <div class="brand-badge">⏳</div>
+          <div>
+            <h1>REWRITTEN</h1>
+            <span id="hud-year" class="hud-year">Spring 1607 • Day 1</span>
+          </div>
+        </div>
+
+        <div class="speed-cluster">
+          <button class="speed-btn" data-speed="0" title="Pause (Space)">⏸</button>
+          <button class="speed-btn active" data-speed="1" title="Normal Speed">1x</button>
+          <button class="speed-btn" data-speed="2" title="Fast Speed">2x</button>
+          <button class="speed-btn" data-speed="4" title="Chronos Speed">4x</button>
+        </div>
+
+        <div class="metrics-cluster">
+          <div id="metric-pop" class="metric-chip" title="Total Colonists and Workforce">👥 20</div>
+          <div id="metric-happiness" class="metric-chip" title="Settlement Happiness">😊 75%</div>
+          <div id="metric-divergence" class="metric-chip metric-div" title="Historical Divergence (Goal: 50%+)">🔀 5%</div>
+          <div id="metric-paradox" class="metric-chip" title="Temporal Paradox & Superstition Pressure (Keep below 70%)">⚡ 2%</div>
+        </div>
+
+        <div class="actions-cluster">
+          <button id="btn-open-tech" class="action-btn btn-tech">⏳ Future Knowledge</button>
+          <button id="btn-open-chronicle" class="action-btn btn-chronicle">📜 Chronicle</button>
+          <button id="btn-center-camera" class="icon-btn" title="Center Camera on Landing">🎯</button>
+          <button id="btn-save-game" class="icon-btn" title="Save Settlement">💾</button>
+          <button id="btn-reset-game" class="icon-btn" title="New 1607 Expedition">🔄</button>
+        </div>
+      </header>
+
+      <!-- Secondary Resource Strip -->
+      <div id="resource-bar" class="resource-bar"></div>
+
+      <!-- Main Workspace: Map Canvas + Right Sidebar -->
+      <div class="main-stage">
+        <div class="canvas-viewport">
+          <canvas id="game-canvas"></canvas>
+          <div id="toast-banner" class="toast-banner"></div>
+          <div class="camera-hint">
+            WASD / Arrows or Right-Drag to Pan • Scroll to Zoom • Right-Click / Esc to Cancel Build
+          </div>
+        </div>
+
+        <aside class="right-sidebar">
+          <div class="panel-card inspector-card">
+            <h3>Tile & Structure Inspector</h3>
+            <div id="inspector-content"></div>
+          </div>
+
+          <div id="settlement-overview-card" class="panel-card overview-card"></div>
+        </aside>
+      </div>
+
+      <!-- Bottom Build Dock -->
+      <footer class="bottom-dock">
+        <div class="dock-tabs">
+          <button class="dock-tab active-tool" data-build-cat="select">🖱️ Inspect</button>
+          <button class="dock-tab active" data-build-cat="all">All Buildings</button>
+          <button class="dock-tab" data-build-cat="civic">🏛️ Civic & Roads</button>
+          <button class="dock-tab" data-build-cat="housing">🛖 Housing</button>
+          <button class="dock-tab" data-build-cat="gathering">🪓 Gathering</button>
+          <button class="dock-tab" data-build-cat="production">⚒️ Production</button>
+          <button class="dock-tab" data-build-cat="temporal">⏳ Time-Travel</button>
+          <button class="dock-tab dock-demolish" data-build-cat="demolish">💣 Demolish</button>
+        </div>
+        <div id="build-cards-container" class="build-cards-row"></div>
+      </footer>
+    </div>
+
+    <!-- Future Knowledge (Insight Tech Tree) Modal -->
+    <div id="modal-tech" class="modal-backdrop hidden">
+      <div class="modal-window modal-wide">
+        <div class="modal-header">
+          <div>
+            <h2>⏳ Future Knowledge & Anachronistic Breakthroughs</h2>
+            <p>Spend Future Insight to introduce advanced agronomy, metallurgy, sanitation, and enlightenment centuries ahead of schedule.</p>
+          </div>
+          <button class="close-btn" data-close-modal>✕</button>
+        </div>
+        <div id="tech-grid-container" class="tech-grid"></div>
+      </div>
+    </div>
+
+    <!-- Timeline Chronicle Modal -->
+    <div id="modal-chronicle" class="modal-backdrop hidden">
+      <div class="modal-window">
+        <div class="modal-header">
+          <div>
+            <h2>📜 The Rewritten Chronicle</h2>
+            <p>Record of your expedition’s interventions and divergence from the original 17th-century timeline.</p>
+          </div>
+          <button class="close-btn" data-close-modal>✕</button>
+        </div>
+        <div id="chronicle-list-container" class="chronicle-list"></div>
+      </div>
+    </div>
+
+    <!-- Historical Event Dilemma Modal -->
+    <div id="modal-event" class="modal-backdrop hidden">
+      <div class="modal-window modal-event-window">
+        <div id="event-modal-body"></div>
+      </div>
+    </div>
+
+    <!-- Victory Modal -->
+    <div id="modal-victory" class="modal-backdrop hidden">
+      <div class="modal-window modal-victory-window">
+        <h2>🌟 History Rewritten: The Enlightened Commonwealth!</h2>
+        <p>
+          Your settlement has blossomed into a beacon of premature science, industry, and public health.
+          Famines and plagues that once doomed the early colonies have been conquered, and a new timeline has taken root!
+        </p>
+        <button id="btn-dismiss-victory" class="btn-primary">Continue Governing Your Colony</button>
+      </div>
+    </div>
+
+    <script type="module" src="./bundle.js"></script>
+  </body>
+</html>
