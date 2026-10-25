@@ -154,10 +154,6 @@ export class GameUI {
       }
     });
 
-    document.getElementById('btn-open-intro')?.addEventListener('click', () => {
-      this.renderIntroModal(true);
-    });
-
     document.getElementById('btn-center-camera')?.addEventListener('click', () => {
       this.renderer.centerOnTile(8, 8);
       this.showToast('Camera centered on James River Landing.', 'info');
@@ -261,13 +257,17 @@ export class GameUI {
         return;
       }
 
-      // Select mode: clicking a building selects it and opens the right panel;
-      // clicking empty ground or clicking the already-selected building unselects it and hides the right panel!
+      // Select mode: clicking a building or mineral deposit selects it and opens the right panel;
+      // clicking empty non-deposit ground or clicking the already-selected tile unselects it and hides the right panel!
       const clickedTile = getTile(this.state, x, y);
       const isSameTile =
         this.renderer.selectedTile?.x === x && this.renderer.selectedTile?.y === y;
+      const isDepositTile =
+        clickedTile &&
+        !clickedTile.buildingId &&
+        (clickedTile.terrain === 'stone_deposit' || clickedTile.terrain === 'iron_deposit');
 
-      if (!clickedTile?.buildingId || isSameTile) {
+      if ((!clickedTile?.buildingId && !isDepositTile) || isSameTile) {
         this.renderer.selectedTile = null;
         this.setSidebarVisible(false);
         this.renderInspector(true);
@@ -573,19 +573,51 @@ export class GameUI {
     this.renderedInspectorKey = nextKey;
 
     if (!bld) {
+      const depositIcon =
+        tile.terrain === 'stone_deposit'
+          ? '🪨'
+          : tile.terrain === 'iron_deposit'
+            ? '⛏️'
+            : '🗺️';
+      const depositBuildId =
+        tile.terrain === 'stone_deposit'
+          ? 'quarry'
+          : tile.terrain === 'iron_deposit'
+            ? 'iron_mine'
+            : null;
+      const depositBldDef = depositBuildId ? BUILDINGS[depositBuildId] : null;
+
       panel.innerHTML = `
         <div class="inspector-section">
           <div class="inspector-header">
-            <span class="inspector-icon">🗺️</span>
+            <span class="inspector-icon">${depositIcon}</span>
             <div>
               <h4>${tDef.name}</h4>
-              <span class="coords-tag">Tile (${tile.x}, ${tile.y})</span>
+              <span class="coords-tag">${tDef.resourceHint ?? 'Colonial Terrain'}</span>
             </div>
           </div>
           <p class="inspector-desc">${tDef.description}</p>
           ${tDef.resourceHint ? `<div class="hint-chip">✨ ${tDef.resourceHint}</div>` : ''}
+          ${
+            depositBldDef
+              ? `<div class="inspector-actions">
+                  <button id="btn-select-deposit-extractor" type="button" class="btn-primary">
+                    ${depositBldDef.icon} Select ${depositBldDef.name}
+                  </button>
+                </div>`
+              : ''
+          }
         </div>
       `;
+
+      if (depositBuildId && depositBldDef) {
+        document.getElementById('btn-select-deposit-extractor')?.addEventListener('click', () => {
+          this.renderer.tool = { mode: 'build', defId: depositBuildId };
+          this.setSidebarVisible(false);
+          this.renderBuildToolbar();
+          this.showToast(`Selected ${depositBldDef.name}. Place it on or adjacent to ${tDef.name}!`, 'info');
+        });
+      }
       return;
     }
 
@@ -670,39 +702,38 @@ export class GameUI {
       `;
     }
 
-    // Production Recipes Block
+    // Production Recipes Block (Automatically uses the best unlocked process)
     let recipesHtml = '';
     if (def.recipes && def.recipes.length > 0 && bld.isConstructed !== false) {
       const activeRecipe =
         def.recipes.find((r) => r.id === bld.activeRecipeId) ?? def.recipes[0];
       const pct = Math.min(100, Math.round((bld.progressSeconds / activeRecipe.cycleSeconds) * 100));
 
-      const recipeCards = def.recipes
+      const inputsStr =
+        Object.entries(activeRecipe.inputs)
+          .map(([k, v]) => `${v} ${RESOURCES[k as ResourceId].icon}`)
+          .join(' + ') || 'Natural Harvest';
+      const outputsStr = Object.entries(activeRecipe.outputs)
+        .map(([k, v]) => `${v} ${RESOURCES[k as ResourceId].icon}`)
+        .join(' + ');
+
+      const lockedUpgrades = def.recipes.filter(
+        (r) => r.requiredTechId && !this.state.unlockedTechIds.includes(r.requiredTechId)
+      );
+      const lockedPreviewHtml = lockedUpgrades
         .map((r) => {
-          const unlocked = !r.requiredTechId || this.state.unlockedTechIds.includes(r.requiredTechId);
-          const isSelected = r.id === activeRecipe.id;
-          const inputsStr =
+          const uIn =
             Object.entries(r.inputs)
               .map(([k, v]) => `${v} ${RESOURCES[k as ResourceId].icon}`)
               .join(' + ') || 'Natural Harvest';
-          const outputsStr = Object.entries(r.outputs)
+          const uOut = Object.entries(r.outputs)
             .map(([k, v]) => `${v} ${RESOURCES[k as ResourceId].icon}`)
             .join(' + ');
-
           return `
-            <button type="button" class="recipe-option ${isSelected ? 'active' : ''} ${unlocked ? '' : 'locked'}" data-recipe-id="${r.id}" aria-pressed="${isSelected}">
-              <div class="recipe-head">
-                <strong>${r.name}</strong>
-                ${r.isAnachronistic ? '<span class="anach-tag">⏳ Future Method</span>' : ''}
-              </div>
-              <div class="recipe-io">${inputsStr} ➔ <strong>${outputsStr}</strong> (${r.cycleSeconds}s)</div>
-              <div class="recipe-desc">${r.description}</div>
-              ${
-                !unlocked
-                  ? `<div class="recipe-lock-note">🔒 Requires ${TECHNOLOGIES[r.requiredTechId!]?.name}</div>`
-                  : ''
-              }
-            </button>
+            <div class="recipe-lock-note" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border-subtle);">
+              🔒 <strong>Future Upgrade (${TECHNOLOGIES[r.requiredTechId!]?.name}):</strong><br/>
+              ${r.name} (${uIn} ➔ ${uOut} every ${r.cycleSeconds}s)
+            </div>
           `;
         })
         .join('');
@@ -716,8 +747,16 @@ export class GameUI {
           <div class="progress-bar-outer">
             <div id="insp-progress-bar" class="progress-bar-inner" style="width: ${pct}%"></div>
           </div>
-          <h5>Production Method (Click to Switch)</h5>
-          <div class="recipe-list">${recipeCards}</div>
+          <h5>Active Production Process</h5>
+          <div class="recipe-option active" style="cursor: default;">
+            <div class="recipe-head">
+              <strong>${activeRecipe.name}</strong>
+              ${activeRecipe.isAnachronistic ? '<span class="anach-tag">⏳ Upgraded Process</span>' : ''}
+            </div>
+            <div class="recipe-io">${inputsStr} ➔ <strong>${outputsStr}</strong> (${activeRecipe.cycleSeconds}s)</div>
+            <div class="recipe-desc">${activeRecipe.description}</div>
+            ${lockedPreviewHtml}
+          </div>
         </div>
       `;
     }
@@ -768,26 +807,6 @@ export class GameUI {
       } else if (res.reason) {
         this.showToast(res.reason, 'warn');
       }
-    });
-
-    // Bind recipe switching
-    panel.querySelectorAll<HTMLButtonElement>('[data-recipe-id]').forEach((el) => {
-      el.addEventListener('click', () => {
-        const rId = el.dataset.recipeId!;
-        const recipe = def.recipes?.find((r) => r.id === rId);
-        if (recipe?.requiredTechId && !this.state.unlockedTechIds.includes(recipe.requiredTechId)) {
-          this.showToast(
-            `Unlock "${TECHNOLOGIES[recipe.requiredTechId]?.name}" in Future Knowledge first!`,
-            'warn'
-          );
-          this.openModal('tech');
-          return;
-        }
-        if (setBuildingRecipe(this.state, bld.id, rId)) {
-          this.showToast(`Switched production to ${recipe?.name}.`, 'success');
-          this.updateInspectorLiveValues(bld);
-        }
-      });
     });
 
     // Bind pause button

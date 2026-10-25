@@ -219,9 +219,12 @@ describe('Rewritten Core Simulation Engine', () => {
     );
   });
 
-  it('unlocks Future Knowledge breakthroughs and switches buildings to anachronistic recipes', () => {
+  it('unlocks Future Knowledge breakthroughs and automatically applies upgraded recipes to both existing and newly built buildings', () => {
     const state = createInitialGameState(1607, true);
-    state.resources.insight = 30;
+    state.resources.insight = 60;
+    state.resources.wood = 60;
+    state.resources.planks = 30;
+    state.resources.coin = 200;
     placeBuilding(state, 'sawmill', 9, 7);
     stepSimulation(state, 8.5);
 
@@ -238,7 +241,17 @@ describe('Rewritten Core Simulation Engine', () => {
     assert.equal(
       sawmill?.activeRecipeId,
       'circular_saw_planks',
-      'Sawmill should automatically upgrade to the anachronistic circular saw recipe'
+      'Existing Sawmill should automatically upgrade to the anachronistic circular saw recipe'
+    );
+
+    // Unlock crop_rotation and then place a brand new wheat_farm on fertile_soil (8, 10)
+    unlockTech(state, 'crop_rotation');
+    const newFarm = placeBuilding(state, 'wheat_farm', 8, 10);
+    assert.equal(newFarm.success, true);
+    assert.equal(
+      newFarm.building?.activeRecipeId,
+      'four_course_seed_drill',
+      'Newly placed Wheat Farm should automatically use the upgraded Norfolk 4-Course recipe'
     );
   });
 

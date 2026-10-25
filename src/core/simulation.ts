@@ -191,12 +191,26 @@ export function createInitialGameState(seed = 1607, withStarterSettlement = fals
   return state;
 }
 
+export function getBestUnlockedRecipe(
+  state: GameState,
+  def: BuildingDefinition
+): RecipeDefinition | undefined {
+  if (!def.recipes || def.recipes.length === 0) return undefined;
+  for (let i = def.recipes.length - 1; i >= 0; i--) {
+    const r = def.recipes[i];
+    if (!r.requiredTechId || state.unlockedTechIds.includes(r.requiredTechId)) {
+      return r;
+    }
+  }
+  return def.recipes[0];
+}
+
 function seedStarterSettlement(state: GameState): void {
   const placeFree = (defId: string, x: number, y: number, initialResidents?: number) => {
     const def = BUILDINGS[defId];
     if (!def) return;
     const id = `bld_${state.nextBuildingSeq++}`;
-    const defaultRecipe = def.recipes && def.recipes.length > 0 ? def.recipes[0].id : '';
+    const defaultRecipe = getBestUnlockedRecipe(state, def)?.id ?? '';
     const buildTime = def.buildTimeSeconds ?? (def.isRoad ? 1.5 : 5);
     const bld: PlacedBuilding = {
       id,
@@ -378,7 +392,7 @@ export function placeBuilding(
   payResources(state, effectiveCost);
 
   const id = `bld_${state.nextBuildingSeq++}`;
-  const defaultRecipe = def.recipes && def.recipes.length > 0 ? def.recipes[0].id : '';
+  const defaultRecipe = getBestUnlockedRecipe(state, def)?.id ?? '';
   const buildTime = def.buildTimeSeconds ?? (def.isRoad ? 1.5 : 6);
 
   const building: PlacedBuilding = {
@@ -724,6 +738,17 @@ export function resolveHistoricalEvent(
 }
 
 export function recalculateNetworkAndCapacities(state: GameState): void {
+  // Ensure all buildings with recipes automatically use their best unlocked process
+  for (const bld of Object.values(state.buildings)) {
+    const def = BUILDINGS[bld.defId];
+    if (def?.recipes && def.recipes.length > 0) {
+      const best = getBestUnlockedRecipe(state, def);
+      if (best && bld.activeRecipeId !== best.id) {
+        bld.activeRecipeId = best.id;
+      }
+    }
+  }
+
   // 1. Storage capacity
   let cap = BASE_WAREHOUSE_CAPACITY;
   for (const bld of Object.values(state.buildings)) {
