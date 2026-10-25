@@ -165,11 +165,24 @@ export const TUTORIAL_STEPS: TutorialStepDefinition[] = [
   },
   {
     index: 8,
-    id: 'quarry_and_upgrade',
-    title: '9. Quarry Stone & Upgrade Homesteads',
-    subtitle: 'Advance from Pioneers to skilled Colonists',
+    id: 'build_academy',
+    title: '9. How to Gain More Future Insight',
+    subtitle: 'Build the Time Traveler’s Academy & Press',
     narrative:
-      'To unlock more Future Knowledge, you need a steady stream of Future Insight. Quarrying Cut Stone (+8 Insight milestone) and upgrading Pioneer Cabins into Colonial Homesteads (+8 Insight milestone) fuels the next era.',
+      'Now that you spent your initial Insight, how do you earn more? Construct a Time Traveler’s Academy & Press (⏳ Time-Travel tab): it grants an immediate +8 Insight milestone bonus, passively generates +3 Insight/min, and actively compiles Timber into +3 Insight every 15 seconds!',
+    objectiveText:
+      'Select "Time Traveler’s Academy & Press" (⏳ Time-Travel tab) and construct it along your road network to generate +15 Insight/min.',
+    recommendedBuildDefId: 'chronicle_observatory',
+    recommendedCategory: 'temporal',
+    highlightTiles: [{ x: 10, y: 7, label: 'Build Academy' }]
+  },
+  {
+    index: 9,
+    id: 'quarry_and_upgrade',
+    title: '10. Quarry Stone & Upgrade Homesteads',
+    subtitle: 'Earn Milestone Insight & advance to Colonists',
+    narrative:
+      'You also earn +8 Future Insight for each Colonial Milestone (quarrying Stone, upgrading a Pioneer Cabin to a Colonial Homestead, and baking Bread), and higher-tier Colonists generate 3x more passive Insight every minute!',
     objectiveText:
       'Build a connected "Stone Quarry" by the Granite Outcrop and upgrade a supplied Pioneer Cabin into a "Colonial Homestead".',
     recommendedBuildDefId: 'quarry',
@@ -178,18 +191,5 @@ export const TUTORIAL_STEPS: TutorialStepDefinition[] = [
       { x: 13, y: 6, label: 'Build Quarry' },
       { x: 8, y: 7 }
     ]
-  },
-  {
-    index: 9,
-    id: 'build_academy',
-    title: '10. Build the Time Traveler’s Academy',
-    subtitle: 'Generate steady Future Insight for breakthroughs',
-    narrative:
-      'The Time Traveler’s Academy & Press is your primary engine of Future Insight: it passively generates +3 Insight/min and compiles Colonial Field Notes for +3 Insight every 15 seconds!',
-    objectiveText:
-      'Select "Time Traveler’s Academy & Press" (⏳ Time-Travel tab) and construct it along your road network (+8 Insight milestone bonus).',
-    recommendedBuildDefId: 'chronicle_observatory',
-    recommendedCategory: 'temporal',
-    highlightTiles: [{ x: 10, y: 7, label: 'Build Academy' }]
   }
 ];

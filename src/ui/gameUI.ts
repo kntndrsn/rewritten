@@ -14,6 +14,7 @@ import {
   canPlaceBuilding,
   canUnlockTech,
   canUpgradeHouse,
+  deferHistoricalEvent,
   demolishTile,
   dismissTutorial,
   getColonialYearString,
@@ -24,6 +25,7 @@ import {
   hasEnoughResources,
   isTutorialStepSatisfied,
   placeBuilding,
+  reopenDeferredEvent,
   resolveHistoricalEvent,
   setBuildingRecipe,
   stepTutorial,
@@ -42,7 +44,7 @@ export class GameUI {
 
   private activeCategory: BuildingCategory | 'all' = 'all';
   private activeModal: 'tech' | 'chronicle' | null = null;
-  private lastRenderedEventId: string | null = null;
+  private lastRenderedEventKey = '';
   private lastTutorialStepIndex = -1;
   private lastTutorialActive = false;
   private renderedInspectorKey = '';
@@ -54,6 +56,7 @@ export class GameUI {
     this.onResetGame = onResetGame;
 
     this.bindStaticControls();
+    this.setSidebarVisible(false);
     this.renderBuildToolbar();
     this.renderInspector(true);
     this.renderTutorialPanel();
@@ -66,9 +69,10 @@ export class GameUI {
 
   public setState(newState: GameState): void {
     this.state = newState;
-    this.lastRenderedEventId = null;
+    this.lastRenderedEventKey = '';
     this.lastTutorialStepIndex = -1;
     this.renderedInspectorKey = '';
+    this.setSidebarVisible(false);
     this.renderBuildToolbar();
     this.renderInspector(true);
     this.renderTutorialPanel();
@@ -79,6 +83,14 @@ export class GameUI {
       this.renderIntroModal(false);
     }
     this.updateHUD();
+  }
+
+  public setSidebarVisible(visible: boolean): void {
+    const sb = document.getElementById('right-sidebar');
+    if (!sb) return;
+    sb.classList.toggle('sidebar-hidden', !visible);
+    sb.classList.toggle('mobile-open', visible);
+    this.renderer.resize();
   }
 
   public showToast(message: string, tone: 'info' | 'success' | 'warn' = 'info'): void {
@@ -125,12 +137,21 @@ export class GameUI {
 
     document.getElementById('btn-toggle-sidebar')?.addEventListener('click', () => {
       const sb = document.getElementById('right-sidebar');
-      sb?.classList.toggle('mobile-open');
+      const isHidden = sb?.classList.contains('sidebar-hidden') ?? true;
+      this.setSidebarVisible(isHidden);
     });
 
     document.getElementById('btn-close-sidebar')?.addEventListener('click', () => {
-      const sb = document.getElementById('right-sidebar');
-      sb?.classList.remove('mobile-open');
+      this.renderer.selectedTile = null;
+      this.setSidebarVisible(false);
+    });
+
+    document.getElementById('btn-reopen-event')?.addEventListener('click', () => {
+      if (reopenDeferredEvent(this.state)) {
+        this.lastRenderedEventKey = '';
+        this.renderEventModal();
+        this.updateHUD();
+      }
     });
 
     document.getElementById('btn-open-intro')?.addEventListener('click', () => {
@@ -151,6 +172,15 @@ export class GameUI {
     });
 
     document.getElementById('btn-reset-game')?.addEventListener('click', () => {
+      document.getElementById('modal-confirm-reset')?.classList.remove('hidden');
+    });
+
+    document.getElementById('btn-cancel-reset')?.addEventListener('click', () => {
+      document.getElementById('modal-confirm-reset')?.classList.add('hidden');
+    });
+
+    document.getElementById('btn-confirm-reset')?.addEventListener('click', () => {
+      document.getElementById('modal-confirm-reset')?.classList.add('hidden');
       clearSavedGame();
       this.onResetGame();
       this.showToast('Started a fresh 1607 expedition timeline.', 'info');
@@ -214,12 +244,13 @@ export class GameUI {
         const res = placeBuilding(this.state, defId, x, y);
         if (res.success) {
           const def = BUILDINGS[defId];
-          this.showToast(`Constructed ${def.name}.`, 'success');
-          this.renderer.selectedTile = { x, y };
-          // After placing the first free Temporal Landing, switch back to select or next tutorial tool
-          if (defId === 'founding_camp') {
+          this.showToast(`Constructing ${def.name}...`, 'success');
+          // Clear build tool selection immediately for all buildings except roads
+          if (!def.isRoad) {
             this.renderer.tool = { mode: 'select' };
           }
+          this.renderer.selectedTile = null;
+          this.setSidebarVisible(false);
           this.renderBuildToolbar();
           this.renderInspector(true);
           this.renderTutorialPanel();
@@ -230,12 +261,20 @@ export class GameUI {
         return;
       }
 
-      // Select mode
-      this.renderer.selectedTile = { x, y };
-      this.renderInspector(true);
+      // Select mode: clicking a building selects it and opens the right panel;
+      // clicking empty ground or clicking the already-selected building unselects it and hides the right panel!
       const clickedTile = getTile(this.state, x, y);
-      if (window.innerWidth <= 768 && clickedTile?.buildingId) {
-        document.getElementById('right-sidebar')?.classList.add('mobile-open');
+      const isSameTile =
+        this.renderer.selectedTile?.x === x && this.renderer.selectedTile?.y === y;
+
+      if (!clickedTile?.buildingId || isSameTile) {
+        this.renderer.selectedTile = null;
+        this.setSidebarVisible(false);
+        this.renderInspector(true);
+      } else {
+        this.renderer.selectedTile = { x, y };
+        this.setSidebarVisible(true);
+        this.renderInspector(true);
       }
     });
 
@@ -361,9 +400,24 @@ export class GameUI {
       techBtn.innerHTML = `⏳ Future Knowledge (${unlockedCount}/${TECHNOLOGY_LIST.length})${canBuyAnyTech ? ' <span class="badge-dot">!</span>' : ''}`;
     }
 
-    // Check if an active Historical Event needs to be shown
-    if (this.state.activeEventId !== this.lastRenderedEventId) {
-      this.lastRenderedEventId = this.state.activeEventId;
+    // Pending / Deferred Event Top-Bar Button & Modal state
+    const reopenEvtBtn = document.getElementById('btn-reopen-event');
+    const daysLeft =
+      this.state.activeEventId && this.state.activeEventDeadlineDay !== null
+        ? Math.max(0, this.state.activeEventDeadlineDay - this.state.day)
+        : 0;
+    if (reopenEvtBtn) {
+      if (this.state.activeEventId && this.state.eventDeferred) {
+        reopenEvtBtn.classList.remove('hidden');
+        reopenEvtBtn.textContent = `⚠️ Pending Event (${daysLeft}d left)`;
+      } else {
+        reopenEvtBtn.classList.add('hidden');
+      }
+    }
+
+    const eventKey = `${this.state.activeEventId ?? 'none'}:${this.state.eventDeferred}:${daysLeft}:${Math.floor(this.state.resources.insight)}`;
+    if (eventKey !== this.lastRenderedEventKey) {
+      this.lastRenderedEventKey = eventKey;
       this.renderEventModal();
     }
 
@@ -748,6 +802,8 @@ export class GameUI {
       const res = demolishTile(this.state, bld.x, bld.y);
       if (res.success) {
         this.showToast('Structure dismantled (50% materials refunded).', 'info');
+        this.renderer.selectedTile = null;
+        this.setSidebarVisible(false);
         this.renderInspector(true);
         this.updateHUD();
       } else if (res.reason) {
@@ -1031,7 +1087,7 @@ export class GameUI {
     const body = document.getElementById('event-modal-body');
     if (!modal || !body) return;
 
-    if (!this.state.activeEventId) {
+    if (!this.state.activeEventId || this.state.eventDeferred) {
       modal.classList.add('hidden');
       return;
     }
@@ -1043,6 +1099,14 @@ export class GameUI {
     }
 
     modal.classList.remove('hidden');
+    const daysLeft =
+      this.state.activeEventDeadlineDay !== null
+        ? Math.max(0, this.state.activeEventDeadlineDay - this.state.day)
+        : 0;
+    const deadlineText =
+      daysLeft > 0
+        ? `⏳ Decision Window: ${daysLeft} Colonial Day${daysLeft === 1 ? '' : 's'} Left`
+        : `⏰ Final Day — Decision Required Now`;
 
     const choicesHtml = evt.choices
       .map((c) => {
@@ -1100,15 +1164,37 @@ export class GameUI {
 
     body.innerHTML = `
       <div class="event-header">
-        <span class="event-year-pill">📅 ${evt.year}</span>
-        <h3>${evt.title}</h3>
+        <div>
+          <span class="event-year-pill">📅 ${evt.year}</span>
+          <h3>${evt.title}</h3>
+        </div>
+        <span class="event-deadline-pill">${deadlineText}</span>
       </div>
       <p class="event-description">${evt.description}</p>
       <div class="historical-note">
         <strong>📖 Original Timeline Record:</strong> ${evt.historicalContext}
       </div>
       <div class="event-choices-list">${choicesHtml}</div>
+      ${
+        daysLeft > 0
+          ? `<button id="btn-defer-event" type="button" class="btn-defer-event">
+              ⏳ Decide Later (${daysLeft}d left — Gather Insight & Supplies First)
+            </button>`
+          : ''
+      }
     `;
+
+    document.getElementById('btn-defer-event')?.addEventListener('click', () => {
+      if (deferHistoricalEvent(this.state)) {
+        this.lastRenderedEventKey = '';
+        modal.classList.add('hidden');
+        this.showToast(
+          `Deferred "${evt.title}" (${daysLeft}d remaining). Click ⚠️ Pending Event in the top bar anytime!`,
+          'info'
+        );
+        this.updateHUD();
+      }
+    });
 
     body.querySelectorAll<HTMLButtonElement>('[data-choice-id]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -1116,7 +1202,7 @@ export class GameUI {
         const res = resolveHistoricalEvent(this.state, evt.id, choiceId);
         if (res.success) {
           this.state.speed = 1;
-          this.lastRenderedEventId = null;
+          this.lastRenderedEventKey = '';
           modal.classList.add('hidden');
           this.showToast(res.outcomeText ?? 'Timeline updated.', 'success');
           this.updateHUD();

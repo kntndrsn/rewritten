@@ -27,6 +27,8 @@ export function loadGameFromStorage(): GameState | null {
     if (!Array.isArray(parsed.achievedMilestoneIds)) parsed.achievedMilestoneIds = [];
     if (typeof parsed.trunksUnsealed !== 'boolean') parsed.trunksUnsealed = true;
     if (typeof parsed.lastEventDay !== 'number') parsed.lastEventDay = 1;
+    if (parsed.activeEventDeadlineDay === undefined) parsed.activeEventDeadlineDay = null;
+    if (typeof parsed.eventDeferred !== 'boolean') parsed.eventDeferred = false;
     recalculateNetworkAndCapacities(parsed);
     return parsed;
   } catch {

@@ -33,10 +33,11 @@
         </div>
 
         <div class="actions-cluster">
+          <button id="btn-reopen-event" class="action-btn btn-pending-event hidden">⚠️ Event</button>
           <button id="btn-open-tech" class="action-btn btn-tech">⏳ Future Knowledge</button>
           <button id="btn-open-chronicle" class="action-btn btn-chronicle">📜 Chronicle</button>
           <button id="btn-toggle-guide" class="icon-btn" title="Toggle Expedition Guide">🧭</button>
-          <button id="btn-toggle-sidebar" class="icon-btn mobile-only-btn" title="Toggle Inspector Panel">📋</button>
+          <button id="btn-toggle-sidebar" class="icon-btn" title="Toggle Inspector Panel">📋</button>
           <button id="btn-open-intro" class="icon-btn" title="View Expedition Story Briefing">📖</button>
           <button id="btn-center-camera" class="icon-btn" title="Center Camera on Landing">🎯</button>
           <button id="btn-save-game" class="icon-btn" title="Save Settlement">💾</button>
@@ -58,9 +59,9 @@
           </div>
         </div>
 
-        <aside id="right-sidebar" class="right-sidebar">
+        <aside id="right-sidebar" class="right-sidebar sidebar-hidden">
           <div class="mobile-sidebar-header">
-            <span>Inspector & Colony Guide</span>
+            <span>Structure Inspector</span>
             <button id="btn-close-sidebar" type="button" class="btn-skip-tutorial">✕ Close</button>
           </div>
           <div id="tutorial-panel" class="tutorial-panel hidden"></div>
@@ -141,6 +142,25 @@
     <div id="modal-intro" class="modal-backdrop hidden">
       <div class="modal-window modal-intro-window">
         <div id="intro-modal-body"></div>
+      </div>
+    </div>
+
+    <!-- Reset Confirmation Modal -->
+    <div id="modal-confirm-reset" class="modal-backdrop hidden">
+      <div class="modal-window" style="max-width: 440px;">
+        <div class="modal-header">
+          <div>
+            <h2>⚠️ Start a New 1607 Expedition?</h2>
+            <p>Are you sure you want to abandon your current settlement and reset the timeline?</p>
+          </div>
+        </div>
+        <p style="font-size: 12.5px; color: #cbd5e1; margin-bottom: 16px; line-height: 1.45;">
+          All current buildings, resources, unlocked Future Knowledge, and historical decisions in this settlement will be permanently cleared.
+        </p>
+        <div class="intro-buttons-row">
+          <button id="btn-cancel-reset" type="button" class="btn-skip-intro">Cancel (Keep Playing)</button>
+          <button id="btn-confirm-reset" type="button" class="btn-danger" style="flex: 1; padding: 9px 14px; font-size: 12.5px;">🔄 Yes, Reset Settlement</button>
+        </div>
       </div>
     </div>
 

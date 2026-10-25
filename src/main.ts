@@ -20,12 +20,13 @@ function bootstrap(): void {
 
   let state: GameState = loadGameFromStorage() ?? createInitialGameState(1607, false);
   const renderer = new CanvasRenderer(canvas);
+  renderer.selectedTile = null;
   renderer.centerOnTile(8, 8);
 
   const resetGame = () => {
     state = createInitialGameState(1607, false);
+    renderer.selectedTile = null;
     ui.setState(state);
-    renderer.selectedTile = { x: 7, y: 8 };
     renderer.centerOnTile(8, 8);
     ui.renderInspector(true);
   };
@@ -55,7 +56,7 @@ function bootstrap(): void {
     const rawDt = Math.min(0.1, Math.max(0, (now - lastFrameTime) / 1000));
     lastFrameTime = now;
 
-    if (state.speed > 0 && !state.activeEventId) {
+    if (state.speed > 0 && (!state.activeEventId || state.eventDeferred)) {
       stepSimulation(state, rawDt * state.speed);
     }
 
