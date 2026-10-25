@@ -44,9 +44,9 @@ export const TUTORIAL_STEPS: TutorialStepDefinition[] = [
     title: '1. Choose Your Landing Site',
     subtitle: 'Establish your Temporal Landing & Warehouse',
     narrative:
-      'The tidewater valley lies untouched before you. First, choose where to pitch your Temporal Landing & Warehouse—your first placement is completely free.',
+      'The tidewater valley lies untouched before you. First, choose where to pitch your Temporal Landing & Warehouse—your first placement is completely free and takes a few seconds to erect.',
     objectiveText:
-      'Select "Temporal Landing & Warehouse" and place it on any clear meadow tile (such as the highlighted clearing between the bay and forest).',
+      'Select "Temporal Landing & Warehouse" and place it on any clear meadow tile (such as the highlighted clearing) and wait for construction to finish.',
     recommendedBuildDefId: 'founding_camp',
     recommendedCategory: 'civic',
     highlightTiles: [
@@ -56,11 +56,27 @@ export const TUTORIAL_STEPS: TutorialStepDefinition[] = [
   },
   {
     index: 1,
+    id: 'build_first_cabin',
+    title: '2. Shelter the Landing Party',
+    subtitle: 'House your first Pioneers so workshops have a workforce',
+    narrative:
+      'Logging camps and fisheries cannot operate without sheltered colonists! Build your first Pioneer Cabin near your Temporal Landing so your founding crew can move in and provide labor.',
+    objectiveText:
+      'Select "Pioneer Cabin" (🛖 Housing) and construct it on a highlighted tile next to your Warehouse (or linked by road).',
+    recommendedBuildDefId: 'pioneer_cabin',
+    recommendedCategory: 'housing',
+    highlightTiles: [
+      { x: 8, y: 7, label: 'Build Pioneer Cabin' },
+      { x: 7, y: 7 }
+    ]
+  },
+  {
+    index: 2,
     id: 'build_lumberjack',
-    title: '2. Fell the Old-Growth Timber',
+    title: '3. Fell the Old-Growth Timber',
     subtitle: 'Establish your primary Timber supply',
     narrative:
-      'Every structure on the colonial frontier requires wood. East of the clearing stands dense Old-Growth Timberland where loggers can fell pine and oak.',
+      'Your shipboard timber is nearly spent. East of the clearing stands dense Old-Growth Timberland where your newly housed Pioneers can fell pine and oak.',
     objectiveText:
       'Select "Lumberjack Camp" (🪓 Gathering) and place it on one of the highlighted tiles along the forest edge.',
     recommendedBuildDefId: 'lumberjack_hut',
@@ -71,12 +87,12 @@ export const TUTORIAL_STEPS: TutorialStepDefinition[] = [
     ]
   },
   {
-    index: 2,
+    index: 3,
     id: 'connect_lumberjack_road',
-    title: '3. Lay a Colonial Cart Road',
-    subtitle: 'Connect your Lumberjack Camp to the Warehouse',
+    title: '4. Lay a Colonial Cart Road',
+    subtitle: 'Connect your Lumberjack Camp and gather Timber',
     narrative:
-      'Workshops must be linked to your Temporal Landing by road so carters can haul harvested timber into storage.',
+      'Workshops must be linked to your Temporal Landing by road so carters can haul harvested timber into storage. Once connected, let your loggers gather Timber for your next buildings.',
     objectiveText:
       'Select "Colonial Cart Road" (🏛️ Civic & Roads) and lay road tiles along the highlighted path until your Lumberjack Camp is connected.',
     recommendedBuildDefId: 'dirt_road',
@@ -89,14 +105,14 @@ export const TUTORIAL_STEPS: TutorialStepDefinition[] = [
     ]
   },
   {
-    index: 3,
+    index: 4,
     id: 'build_fishery',
-    title: '4. Cast Nets in the Shallows',
+    title: '5. Cast Nets in the Shallows',
     subtitle: 'Secure Salted Fish before landing rations run out',
     narrative:
-      'Your pioneers consume Salted Fish every minute. The western bay and tidal river teem with fish—establish a Coastal Fishery and link it by road.',
+      'Your pioneers consume Salted Fish every minute. Once your Lumberjack Camp has harvested enough Timber, establish a Coastal Fishery on the western shore and link it by road.',
     objectiveText:
-      'Build a "Coastal Fishery" on a highlighted shore tile and connect it to your Warehouse with a "Colonial Cart Road".',
+      'Gather 12 Timber, build a "Coastal Fishery" on a highlighted shore tile, and connect it to your Warehouse with a "Colonial Cart Road".',
     recommendedBuildDefId: 'fishery',
     recommendedCategory: 'gathering',
     highlightTiles: [
@@ -105,32 +121,14 @@ export const TUTORIAL_STEPS: TutorialStepDefinition[] = [
     ]
   },
   {
-    index: 4,
-    id: 'shelter_and_market',
-    title: '5. Shelter Pioneers & Open a Market',
-    subtitle: 'Grow your workforce and distribute rations',
-    narrative:
-      'With timber and fish flowing into your Warehouse, more settlers can come ashore. They need Pioneer Cabins for shelter and a central Colonial Market Square to receive rations.',
-    objectiveText:
-      'Construct at least 3 connected "Pioneer Cabins" and 1 connected "Colonial Market Square" along your road network.',
-    recommendedBuildDefId: 'pioneer_cabin',
-    recommendedCategory: 'housing',
-    highlightTiles: [
-      { x: 8, y: 7, label: 'Build Cabins & Market' },
-      { x: 8, y: 9 },
-      { x: 9, y: 9 },
-      { x: 9, y: 7 }
-    ]
-  },
-  {
     index: 5,
     id: 'build_sawmill',
     title: '6. Mill Structural Planks',
     subtitle: 'Refine raw Timber into Milled Planks',
     narrative:
-      'Rough logs suffice for frontier huts, but homestead upgrades, farms, and laboratories require Milled Planks cut at a Sawmill.',
+      'You arrived with zero pre-milled Planks. Before you can erect a Market Square or quarry stone, build a Sawmill along your road network and let it saw raw Timber into Milled Planks.',
     objectiveText:
-      'Build a connected "Sawmill" (⚒️ Production) along your road network so your colony begins milling Planks.',
+      'Gather 14 Timber, build a connected "Sawmill" (⚒️ Production) along your road network, and let it mill Planks.',
     recommendedBuildDefId: 'sawmill',
     recommendedCategory: 'production',
     highlightTiles: [
@@ -140,8 +138,25 @@ export const TUTORIAL_STEPS: TutorialStepDefinition[] = [
   },
   {
     index: 6,
+    id: 'shelter_and_market',
+    title: '7. Expand Housing & Open a Market',
+    subtitle: 'Grow your workforce and distribute rations',
+    narrative:
+      'As your Sawmill produces Milled Planks and your Lumberjack harvests Timber, build additional Pioneer Cabins for a larger workforce and open a central Colonial Market Square.',
+    objectiveText:
+      'Have at least 3 connected "Pioneer Cabins" and 1 connected "Colonial Market Square" (requires 6 Planks from your Sawmill).',
+    recommendedBuildDefId: 'market_square',
+    recommendedCategory: 'civic',
+    highlightTiles: [
+      { x: 9, y: 7, label: 'Build Market & Cabins' },
+      { x: 8, y: 9 },
+      { x: 9, y: 9 }
+    ]
+  },
+  {
+    index: 7,
     id: 'unseal_future_knowledge',
-    title: '7. Unseal the Future Archives',
+    title: '8. Unseal the Future Archives',
     subtitle: 'Introduce your first anachronistic invention',
     narrative:
       'Your colonial foothold is self-sustaining! Your team has unsealed the oilskin trunks of future scientific treatises (+20 Future Insight granted). Now you can begin rewriting history.',
@@ -149,25 +164,25 @@ export const TUTORIAL_STEPS: TutorialStepDefinition[] = [
       'Click "⏳ Future Knowledge" in the top bar and unlock your first anachronistic breakthrough (such as Rotary Saw or Norfolk Crop Rotation).'
   },
   {
-    index: 7,
+    index: 8,
     id: 'quarry_and_upgrade',
-    title: '8. Quarry Stone & Upgrade Homesteads',
+    title: '9. Quarry Stone & Upgrade Homesteads',
     subtitle: 'Advance from Pioneers to skilled Colonists',
     narrative:
-      'To unlock more Future Knowledge, you need a steady stream of Future Insight. Upgrading Pioneer Cabins into Colonial Homesteads (+8 Insight milestone bonus) and quarrying Cut Stone fuels the next era.',
+      'To unlock more Future Knowledge, you need a steady stream of Future Insight. Quarrying Cut Stone (+8 Insight milestone) and upgrading Pioneer Cabins into Colonial Homesteads (+8 Insight milestone) fuels the next era.',
     objectiveText:
-      'Click a supplied Pioneer Cabin and upgrade it to a "Colonial Homestead", or build a connected "Stone Quarry" by the northern Granite Outcrop.',
+      'Build a connected "Stone Quarry" by the northern Granite Outcrop, then upgrade a supplied Pioneer Cabin into a "Colonial Homestead".',
     recommendedBuildDefId: 'quarry',
     recommendedCategory: 'gathering',
     highlightTiles: [
       { x: 13, y: 6, label: 'Build Quarry' },
-      { x: 8, y: 7, label: 'Upgrade Cabin' }
+      { x: 8, y: 7 }
     ]
   },
   {
-    index: 8,
+    index: 9,
     id: 'build_academy',
-    title: '9. Build the Time Traveler’s Academy',
+    title: '10. Build the Time Traveler’s Academy',
     subtitle: 'Generate steady Future Insight for breakthroughs',
     narrative:
       'The Time Traveler’s Academy & Press is your primary engine of Future Insight: it passively generates +3 Insight/min and compiles Colonial Field Notes for +3 Insight every 15 seconds!',

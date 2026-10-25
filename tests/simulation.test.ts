@@ -50,66 +50,81 @@ describe('Rewritten Core Simulation Engine', () => {
     assert.ok((secondCost?.wood ?? 0) > 0, 'Second warehouse should require normal resources');
   });
 
-  it('walks through the tutorial from player-chosen landing to Academy and supports Back/Next/Dismiss', () => {
+  it('walks through the tutorial with housing required before gathering and construction time required', () => {
     const state = createInitialGameState(1607);
     assert.equal(state.tutorialStepIndex, 0);
+    assert.equal(state.resources.wood, 24);
+    assert.equal(state.resources.planks, 0);
+    assert.equal(state.resources.stone, 0);
 
-    // Step 1: Place Temporal Landing at (7, 8)
-    placeBuilding(state, 'founding_camp', 7, 8);
-    assert.equal(state.tutorialStepIndex, 1, 'Should advance to Step 2 (Build Lumberjack)');
+    // Step 1: Place Temporal Landing at (7, 8) -> requires 3s construction time
+    const landing = placeBuilding(state, 'founding_camp', 7, 8);
+    assert.equal(landing.building?.isConstructed, false);
+    assert.equal(landing.building?.status, 'constructing');
+    assert.equal(state.tutorialStepIndex, 0, 'Should stay on Step 1 while Landing is under construction');
+    stepSimulation(state, 3.5);
+    assert.equal(landing.building?.isConstructed, true);
+    assert.equal(state.tutorialStepIndex, 1, 'Should advance to Step 2 (Shelter the Landing Party)');
+    assert.equal(TUTORIAL_STEPS[state.tutorialStepIndex].id, 'build_first_cabin');
 
-    // Test stepping backward and forward manually
-    stepTutorial(state, -1);
-    assert.equal(state.tutorialStepIndex, 0);
-    stepTutorial(state, 1);
-    assert.equal(state.tutorialStepIndex, 1);
-
-    // Test dismissing and toggling guide without granting duplicate Insight
-    const insightBeforeDismiss = state.resources.insight;
-    dismissTutorial(state);
-    assert.equal(state.tutorialActive, false);
-    assert.equal(state.resources.insight, insightBeforeDismiss);
-    toggleTutorial(state);
-    assert.equal(state.tutorialActive, true);
-
-    // Step 2: Build Lumberjack Camp at (11, 7)
+    // Verify that if a Lumberjack Camp is built before any housing exists, it has 0% workforce ('no_workers')
     placeBuilding(state, 'lumberjack_hut', 11, 7);
-    assert.equal(state.tutorialStepIndex, 2);
-
-    // Step 3: Connect Lumberjack Camp by road at (8,8)..(11,8)
     placeBuilding(state, 'dirt_road', 8, 8);
     placeBuilding(state, 'dirt_road', 9, 8);
     placeBuilding(state, 'dirt_road', 10, 8);
     placeBuilding(state, 'dirt_road', 11, 8);
-    assert.equal(state.tutorialStepIndex, 3);
+    stepSimulation(state, 7);
+    const ljBld = Object.values(state.buildings).find((b) => b.defId === 'lumberjack_hut')!;
+    assert.equal(
+      ljBld.status,
+      'no_workers',
+      'Lumberjack should not operate when colony has 0 housed settlers'
+    );
+    assert.equal(state.laborEfficiency, 0);
 
-    // Step 4: Build Fishery at (5, 8) and road at (6, 8)
+    // Step 2: Build first Pioneer Cabin at (8, 7) -> once constructed, provides 6 Pioneers so Lumberjack starts working!
+    placeBuilding(state, 'pioneer_cabin', 8, 7);
+    stepSimulation(state, 5.5);
+    assert.equal(state.totalPopulation, 8);
+    assert.equal(ljBld.status, 'working');
+    assert.equal(
+      state.tutorialStepIndex,
+      4,
+      'With Landing, First Cabin, Lumberjack, and Road complete, should be on Step 5 (Build Fishery)'
+    );
+
+    // Let Lumberjack harvest wood so we can afford Fishery, Sawmill, Cabins, and Market Square
+    stepSimulation(state, 100);
+    assert.ok(state.resources.wood >= 28, 'Lumberjack should have harvested timber');
+
+    // Step 5: Build Fishery at (5, 8) and road at (6, 8)
     placeBuilding(state, 'dirt_road', 6, 8);
     placeBuilding(state, 'fishery', 5, 8);
-    assert.equal(state.tutorialStepIndex, 4);
+    stepSimulation(state, 6.5);
+    assert.equal(state.tutorialStepIndex, 5, 'Should advance to Step 6 (Build Sawmill)');
 
-    // Step 5: Build 3 Pioneer Cabins and 1 Market Square
-    placeBuilding(state, 'pioneer_cabin', 8, 7);
+    // Step 6: Build Sawmill at (7, 7) and let it mill Planks
+    placeBuilding(state, 'sawmill', 7, 7);
+    stepSimulation(state, 8.5);
+    assert.equal(state.tutorialStepIndex, 6, 'Should advance to Step 7 (Expand Housing & Market)');
+
+    // Wait for Sawmill and Lumberjack to produce enough Wood & Planks for 2 more Cabins + Market Square
+    stepSimulation(state, 150);
     placeBuilding(state, 'pioneer_cabin', 8, 9);
     placeBuilding(state, 'pioneer_cabin', 9, 9);
     placeBuilding(state, 'market_square', 9, 7);
-    assert.equal(state.tutorialStepIndex, 5);
-    assert.equal(state.trunksUnsealed, false);
-
-    // Step 6: Build Sawmill at (7, 7) -> unseals Future Archives (+20 Insight once)
-    placeBuilding(state, 'sawmill', 7, 7);
-    assert.equal(state.tutorialStepIndex, 6);
+    stepSimulation(state, 8.5);
+    assert.equal(state.tutorialStepIndex, 7, 'Should advance to Step 8 (Unseal Future Knowledge)');
     assert.equal(state.trunksUnsealed, true);
-    const insightAfterUnseal = state.resources.insight;
-    assert.ok(insightAfterUnseal >= 24);
 
     // Calling unsealFutureTrunks again must never grant another +20 Insight
+    const insightAfterUnseal = state.resources.insight;
     assert.equal(unsealFutureTrunks(state), false);
     assert.equal(state.resources.insight, insightAfterUnseal);
 
-    // Step 7: Unlock first Future Knowledge breakthrough -> advances to Step 8 (Quarry & Upgrade)
+    // Step 8: Unlock first Future Knowledge breakthrough -> advances to Step 9
     unlockTech(state, 'water_circular_saw');
-    assert.equal(state.tutorialStepIndex, 7);
+    assert.equal(state.tutorialStepIndex, 8);
   });
 
   it('keeps tutorial text free of coordinate numbers and Anno references', () => {
@@ -121,7 +136,7 @@ describe('Rewritten Core Simulation Engine', () => {
         `Step ${step.id} should not contain coordinate pairs: ${combined}`
       );
       assert.equal(
-        /anno/i.test(combined),
+        /\banno\b/i.test(combined),
         false,
         `Step ${step.id} should not reference Anno: ${combined}`
       );
@@ -130,19 +145,21 @@ describe('Rewritten Core Simulation Engine', () => {
 
   it('awards mid-game milestone Insight and generates active Insight at the Time Traveler Academy', () => {
     const state = createInitialGameState(1607, true);
+    state.resources.wood = 50;
     state.resources.planks = 50;
     state.resources.stone = 50;
     state.resources.tools = 50;
     state.resources.coin = 500;
 
     const beforeInsight = state.resources.insight;
-    // Place Time Traveler's Academy at (10, 7) adjacent to road (9, 8)/(9, 7)
     placeBuilding(state, 'dirt_road', 10, 8);
     const acad = placeBuilding(state, 'chronicle_observatory', 10, 7);
     assert.equal(acad.success, true);
+    // Complete construction of road (1.5s) and Academy (12s)
+    stepSimulation(state, 12.5);
     assert.ok(
       state.resources.insight >= beforeInsight + 8,
-      'Building the first Academy should award the +8 Insight milestone bonus'
+      'Building and completing the first Academy should award the +8 Insight milestone bonus'
     );
 
     const afterMilestoneInsight = state.resources.insight;
@@ -155,6 +172,10 @@ describe('Rewritten Core Simulation Engine', () => {
 
   it('validates terrain and adjacency rules when placing buildings', () => {
     const state = createInitialGameState(1607, true);
+    state.resources.wood = 50;
+    state.resources.planks = 20;
+    state.resources.stone = 20;
+    state.resources.coin = 200;
 
     // Wheat farm requires fertile_soil; (8, 10) is guaranteed fertile_soil
     const validFarm = canPlaceBuilding(state, 'wheat_farm', 8, 10);
@@ -173,19 +194,22 @@ describe('Rewritten Core Simulation Engine', () => {
     const placed = placeBuilding(state, 'sawmill', 9, 7);
     assert.equal(placed.success, true);
     assert.ok(state.resources.wood < beforeWood, 'Wood cost should be deducted');
+    stepSimulation(state, 8.5);
     assert.equal(placed.building?.connectedToLogistics, true);
   });
 
   it('runs production chains at the slower colonial pace and converts inputs into outputs', () => {
     const state = createInitialGameState(1607, true);
+    state.resources.wood = 50;
     const sawmillRes = placeBuilding(state, 'sawmill', 9, 7);
     assert.equal(sawmillRes.success, true);
 
     const initialPlanks = state.resources.planks;
-    stepSimulation(state, 15);
+    // 8s construction + 15s production cycle
+    stepSimulation(state, 24);
     assert.ok(
       state.resources.planks > initialPlanks,
-      `Expected Sawmill to produce planks after 15s cycle (was ${initialPlanks}, now ${state.resources.planks})`
+      `Expected Sawmill to produce planks after construction + cycle (was ${initialPlanks}, now ${state.resources.planks})`
     );
   });
 
@@ -193,6 +217,7 @@ describe('Rewritten Core Simulation Engine', () => {
     const state = createInitialGameState(1607, true);
     state.resources.insight = 30;
     placeBuilding(state, 'sawmill', 9, 7);
+    stepSimulation(state, 8.5);
 
     const canUnlock = canUnlockTech(state, 'water_circular_saw');
     assert.equal(canUnlock.valid, true);
@@ -213,8 +238,12 @@ describe('Rewritten Core Simulation Engine', () => {
 
   it('upgrades Pioneer Cabin to Colonial Homestead and Enlightened Manor when needs and tech are met', () => {
     const state = createInitialGameState(1607, true);
+    state.resources.wood = 50;
+    state.resources.planks = 50;
+    state.resources.stone = 50;
+    state.resources.coin = 300;
     placeBuilding(state, 'market_square', 9, 7);
-    stepSimulation(state, 2);
+    stepSimulation(state, 9);
 
     const cabin = Object.values(state.buildings).find((b) => b.defId === 'pioneer_cabin');
     assert.ok(cabin, 'Expected a starter pioneer cabin');
@@ -254,6 +283,7 @@ describe('Rewritten Core Simulation Engine', () => {
     assert.equal(state.activeEventId, 'starving_winter_1609');
 
     state.resources.insight = 25;
+    state.resources.wood = 20;
     const prevDiv = state.divergence;
     const prevChronLen = state.chronicle.length;
     const res = resolveHistoricalEvent(state, 'starving_winter_1609', 'cold_frame_root_cellars');

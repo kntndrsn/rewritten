@@ -505,7 +505,8 @@ export class GameUI {
 
     const tDef = TERRAINS[tile.terrain];
     const bld = tile.buildingId ? this.state.buildings[tile.buildingId] : undefined;
-    const nextKey = `${sel.x},${sel.y}:${bld?.id ?? 'empty'}:${bld?.defId ?? ''}:${this.state.unlockedTechIds.join(',')}`;
+    const isConstructed = bld ? bld.isConstructed !== false : true;
+    const nextKey = `${sel.x},${sel.y}:${bld?.id ?? 'empty'}:${bld?.defId ?? ''}:${isConstructed}:${this.state.unlockedTechIds.join(',')}`;
 
     if (!forceRebuild && this.renderedInspectorKey === nextKey) {
       if (bld) {
@@ -536,9 +537,28 @@ export class GameUI {
     const def = BUILDINGS[bld.defId];
     const stInfo = this.getStatusDisplay(bld.status);
 
+    let constructionHtml = '';
+    if (bld.isConstructed === false) {
+      const cPct = Math.min(
+        100,
+        Math.round(((bld.constructionProgressSeconds || 0) / (bld.buildTimeSeconds || 5)) * 100)
+      );
+      constructionHtml = `
+        <div class="inspector-box">
+          <div class="box-row">
+            <span>Construction Progress:</span>
+            <strong id="insp-construction-val">${cPct}% (${(bld.constructionProgressSeconds || 0).toFixed(1)}s / ${bld.buildTimeSeconds || 5}s)</strong>
+          </div>
+          <div class="progress-bar-outer">
+            <div id="insp-construction-bar" class="progress-bar-inner" style="width: ${cPct}%"></div>
+          </div>
+        </div>
+      `;
+    }
+
     // Housing Inspector Block
     let housingHtml = '';
-    if (def.housing) {
+    if (def.housing && bld.isConstructed !== false) {
       const tierDef = POPULATION_TIERS[def.housing.tier];
       const upgCheck = canUpgradeHouse(this.state, bld.id);
       const nextDef = def.housing.upgradesToBuildingId
@@ -597,7 +617,7 @@ export class GameUI {
 
     // Production Recipes Block
     let recipesHtml = '';
-    if (def.recipes && def.recipes.length > 0) {
+    if (def.recipes && def.recipes.length > 0 && bld.isConstructed !== false) {
       const activeRecipe =
         def.recipes.find((r) => r.id === bld.activeRecipeId) ?? def.recipes[0];
       const pct = Math.min(100, Math.round((bld.progressSeconds / activeRecipe.cycleSeconds) * 100));
@@ -664,6 +684,7 @@ export class GameUI {
           ${def.passiveInsightPerMin ? `<div><span>Insight:</span> <strong>⏳ +${def.passiveInsightPerMin}/m</strong></div>` : ''}
           ${def.serviceRadius ? `<div><span>Service Radius:</span> <strong>${def.serviceRadius} tiles</strong></div>` : ''}
         </div>
+        ${constructionHtml}
         ${housingHtml}
         ${recipesHtml}
         <div class="inspector-actions">
@@ -736,8 +757,10 @@ export class GameUI {
 
   private getStatusDisplay(status: string): { label: string; cls: string } {
     const statusMap: Record<string, { label: string; cls: string }> = {
+      constructing: { label: '🔨 Under Construction...', cls: 'status-warn' },
       working: { label: '⚡ Operating Normally', cls: 'status-ok' },
       no_road: { label: '⚠️ Disconnected from Road/Warehouse', cls: 'status-err' },
+      no_workers: { label: '👷 No Workforce — Build Pioneer Cabins!', cls: 'status-err' },
       missing_inputs: { label: '⏳ Waiting for Input Materials', cls: 'status-warn' },
       storage_full: { label: '📦 Warehouse Storage Full', cls: 'status-warn' },
       paused: { label: '⏸ Production Paused', cls: 'status-warn' },
@@ -756,6 +779,22 @@ export class GameUI {
       const stInfo = this.getStatusDisplay(bld.status);
       statusPill.className = `status-pill ${stInfo.cls}`;
       statusPill.textContent = stInfo.label;
+    }
+
+    if (bld.isConstructed === false) {
+      const cPct = Math.min(
+        100,
+        Math.round(((bld.constructionProgressSeconds || 0) / (bld.buildTimeSeconds || 5)) * 100)
+      );
+      const cVal = document.getElementById('insp-construction-val');
+      if (cVal) {
+        cVal.textContent = `${cPct}% (${(bld.constructionProgressSeconds || 0).toFixed(1)}s / ${bld.buildTimeSeconds || 5}s)`;
+      }
+      const cBar = document.getElementById('insp-construction-bar');
+      if (cBar) {
+        cBar.style.width = `${cPct}%`;
+      }
+      return;
     }
 
     if (def.housing) {
@@ -1200,7 +1239,7 @@ export class GameUI {
       const bDef = BUILDINGS[step.recommendedBuildDefId];
       primaryBtnHtml = `
         <button type="button" data-tutorial-select-build class="btn-tutorial-action">
-          🔨 ${bDef.icon} ${bDef.name}
+          ${bDef.icon} Select ${bDef.name}
         </button>
       `;
     } else if (step.id === 'unseal_future_knowledge') {

@@ -528,6 +528,16 @@ export class CanvasRenderer {
 
     if (def.isRoad) {
       this.drawRoadTile(ctx, state, bld.x, bld.y, px, py, ts);
+      if (bld.isConstructed === false) {
+        const ratio = Math.min(
+          1,
+          Math.max(0, (bld.constructionProgressSeconds || 0) / (bld.buildTimeSeconds || 1.5))
+        );
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(px + 6, py + ts - 8, ts - 12, 4);
+        ctx.fillStyle = '#fbbf24';
+        ctx.fillRect(px + 6, py + ts - 8, (ts - 12) * ratio, 4);
+      }
       return;
     }
 
@@ -536,6 +546,45 @@ export class CanvasRenderer {
     const by = py + pad;
     const bw = ts - pad * 2;
     const bh = ts - pad * 2;
+
+    if (bld.isConstructed === false) {
+      const ratio = Math.min(
+        1,
+        Math.max(0, (bld.constructionProgressSeconds || 0) / (bld.buildTimeSeconds || 5))
+      );
+      ctx.fillStyle = 'rgba(30, 41, 59, 0.76)';
+      ctx.fillRect(bx, by, bw, bh);
+
+      ctx.strokeStyle = '#d97706';
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.setLineDash([]);
+
+      ctx.strokeStyle = 'rgba(217, 119, 6, 0.45)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(bx + 3, by + 3);
+      ctx.lineTo(bx + bw - 3, by + bh - 10);
+      ctx.moveTo(bx + bw - 3, by + 3);
+      ctx.lineTo(bx + 3, by + bh - 10);
+      ctx.stroke();
+
+      ctx.font = `${Math.floor(ts * 0.32)}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.fillText(def.icon, px + ts * 0.5, py + ts * 0.42);
+
+      const barX = bx + 3;
+      const barY = by + bh - 7;
+      const barW = bw - 6;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(barX, barY, barW, 5);
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillRect(barX, barY, barW * ratio, 5);
+      return;
+    }
 
     // Drop shadow
     ctx.fillStyle = 'rgba(0, 0, 0, 0.36)';
@@ -609,8 +658,13 @@ export class CanvasRenderer {
       }
     }
 
-    // Status warning badge (no road, missing inputs, paused)
-    if (bld.status === 'no_road' || bld.status === 'missing_inputs' || bld.status === 'paused') {
+    // Status warning badge (no road, no workers, missing inputs, paused)
+    if (
+      bld.status === 'no_road' ||
+      bld.status === 'no_workers' ||
+      bld.status === 'missing_inputs' ||
+      bld.status === 'paused'
+    ) {
       ctx.fillStyle = bld.status === 'paused' ? '#64748b' : '#ef4444';
       ctx.beginPath();
       ctx.arc(px + pad + 5, py + pad + 5, ts * 0.12, 0, Math.PI * 2);

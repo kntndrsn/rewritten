@@ -84,6 +84,7 @@ export interface BuildingDefinition {
   accentColor: string;
   description: string;
   cost: Partial<Record<ResourceId, number>>;
+  buildTimeSeconds?: number;
   upkeepCoinPerMin: number;
   workersRequired: number;
   allowedTerrains: TerrainType[];
