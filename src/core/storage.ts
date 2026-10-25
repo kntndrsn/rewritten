@@ -1,4 +1,10 @@
-import { type GameState, recalculateNetworkAndCapacities } from './simulation.ts';
+import { TUTORIAL_STEPS } from '../data/tutorial.ts';
+import {
+  type GameState,
+  evaluateTutorialProgress,
+  isTutorialStepSatisfied,
+  recalculateNetworkAndCapacities
+} from './simulation.ts';
 
 const STORAGE_KEY = 'rewritten_save_v1';
 
@@ -27,7 +33,22 @@ export function loadGameFromStorage(): GameState | null {
     if (!Array.isArray(parsed.achievedMilestoneIds)) parsed.achievedMilestoneIds = [];
     if (typeof parsed.trunksUnsealed !== 'boolean') parsed.trunksUnsealed = true;
     if (typeof parsed.lastEventDay !== 'number') parsed.lastEventDay = 1;
+    if (parsed.activeEventDeadlineDay === undefined) parsed.activeEventDeadlineDay = null;
+    if (typeof parsed.eventDeferred !== 'boolean') parsed.eventDeferred = false;
     recalculateNetworkAndCapacities(parsed);
+    evaluateTutorialProgress(parsed);
+    if (!parsed.tutorialCompleted) {
+      const firstIncomplete = TUTORIAL_STEPS.findIndex(
+        (s) => !isTutorialStepSatisfied(parsed, s.id)
+      );
+      if (firstIncomplete === -1) {
+        parsed.tutorialStepIndex = TUTORIAL_STEPS.length - 1;
+        parsed.tutorialCompleted = true;
+        parsed.tutorialActive = false;
+      } else {
+        parsed.tutorialStepIndex = firstIncomplete;
+      }
+    }
     return parsed;
   } catch {
     return null;

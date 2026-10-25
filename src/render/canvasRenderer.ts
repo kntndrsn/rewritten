@@ -359,6 +359,14 @@ export class CanvasRenderer {
         ctx.strokeStyle = '#ffd166';
         ctx.lineWidth = 2.5;
         ctx.strokeRect(px + 1.5, py + 1.5, ts - 3, ts - 3);
+
+        const selTile = state.tiles[y][x];
+        if (
+          !selTile.buildingId &&
+          (selTile.terrain === 'stone_deposit' || selTile.terrain === 'iron_deposit')
+        ) {
+          this.drawTerrainLabelBadge(ctx, selTile.terrain, px, py, ts);
+        }
       }
     }
 
@@ -1012,6 +1020,45 @@ export class CanvasRenderer {
     ctx.restore();
   }
 
+  private drawTerrainLabelBadge(
+    ctx: CanvasRenderingContext2D,
+    terrain: string,
+    px: number,
+    py: number,
+    ts: number
+  ): void {
+    const tDef = TERRAINS[terrain as keyof typeof TERRAINS];
+    if (!tDef) return;
+    const icon =
+      terrain === 'stone_deposit'
+        ? '🪨'
+        : terrain === 'iron_deposit'
+          ? '⛏️'
+          : terrain === 'fertile_soil'
+            ? '🌾'
+            : terrain === 'forest'
+              ? '🌲'
+              : '🐟';
+    const label = tDef.resourceHint ? `${icon} ${tDef.name} (${tDef.resourceHint})` : `${icon} ${tDef.name}`;
+
+    ctx.save();
+    ctx.font = '600 11px system-ui, sans-serif';
+    const textWidth = ctx.measureText(label).width;
+    const boxW = textWidth + 14;
+    const boxX = px + ts * 0.5 - boxW * 0.5;
+    const boxY = py - 24;
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+    ctx.fillRect(boxX, boxY, boxW, 20);
+    ctx.strokeStyle = '#fbbf24';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(boxX, boxY, boxW, 20);
+    ctx.fillStyle = '#fef3c7';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, px + ts * 0.5, boxY + 10);
+    ctx.restore();
+  }
+
   private drawHoverAndPlacementGhost(
     ctx: CanvasRenderingContext2D,
     state: GameState,
@@ -1025,6 +1072,15 @@ export class CanvasRenderer {
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(px + 1, py + 1, ts - 2, ts - 2);
+
+      const tile = getTile(state, x, y);
+      if (
+        tile &&
+        !tile.buildingId &&
+        (tile.terrain === 'stone_deposit' || tile.terrain === 'iron_deposit')
+      ) {
+        this.drawTerrainLabelBadge(ctx, tile.terrain, px, py, ts);
+      }
       return;
     }
 

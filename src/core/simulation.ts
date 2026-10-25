@@ -79,6 +79,8 @@ export interface GameState {
   unlockedTechIds: string[];
   completedEventIds: string[];
   activeEventId: string | null;
+  activeEventDeadlineDay: number | null;
+  eventDeferred: boolean;
   divergence: number;
   paradox: number;
   day: number;
@@ -107,6 +109,7 @@ export const WIN_CONDITIONS = {
 
 export const SECONDS_PER_DAY = 25;
 export const MIN_DAYS_BETWEEN_EVENTS = 8;
+export const EVENT_DECISION_WINDOW_DAYS = 5;
 
 export function getColonialYearString(day: number): string {
   const baseYear = 1607;
@@ -149,6 +152,8 @@ export function createInitialGameState(seed = 1607, withStarterSettlement = fals
     unlockedTechIds: [],
     completedEventIds: [],
     activeEventId: null,
+    activeEventDeadlineDay: null,
+    eventDeferred: false,
     divergence: 5,
     paradox: 2,
     day: 1,
@@ -186,12 +191,26 @@ export function createInitialGameState(seed = 1607, withStarterSettlement = fals
   return state;
 }
 
+export function getBestUnlockedRecipe(
+  state: GameState,
+  def: BuildingDefinition
+): RecipeDefinition | undefined {
+  if (!def.recipes || def.recipes.length === 0) return undefined;
+  for (let i = def.recipes.length - 1; i >= 0; i--) {
+    const r = def.recipes[i];
+    if (!r.requiredTechId || state.unlockedTechIds.includes(r.requiredTechId)) {
+      return r;
+    }
+  }
+  return def.recipes[0];
+}
+
 function seedStarterSettlement(state: GameState): void {
   const placeFree = (defId: string, x: number, y: number, initialResidents?: number) => {
     const def = BUILDINGS[defId];
     if (!def) return;
     const id = `bld_${state.nextBuildingSeq++}`;
-    const defaultRecipe = def.recipes && def.recipes.length > 0 ? def.recipes[0].id : '';
+    const defaultRecipe = getBestUnlockedRecipe(state, def)?.id ?? '';
     const buildTime = def.buildTimeSeconds ?? (def.isRoad ? 1.5 : 5);
     const bld: PlacedBuilding = {
       id,
@@ -373,7 +392,7 @@ export function placeBuilding(
   payResources(state, effectiveCost);
 
   const id = `bld_${state.nextBuildingSeq++}`;
-  const defaultRecipe = def.recipes && def.recipes.length > 0 ? def.recipes[0].id : '';
+  const defaultRecipe = getBestUnlockedRecipe(state, def)?.id ?? '';
   const buildTime = def.buildTimeSeconds ?? (def.isRoad ? 1.5 : 6);
 
   const building: PlacedBuilding = {
@@ -699,6 +718,8 @@ export function resolveHistoricalEvent(
   }
   if (state.activeEventId === eventId) {
     state.activeEventId = null;
+    state.activeEventDeadlineDay = null;
+    state.eventDeferred = false;
   }
   state.lastEventDay = state.day;
 
@@ -717,6 +738,17 @@ export function resolveHistoricalEvent(
 }
 
 export function recalculateNetworkAndCapacities(state: GameState): void {
+  // Ensure all buildings with recipes automatically use their best unlocked process
+  for (const bld of Object.values(state.buildings)) {
+    const def = BUILDINGS[bld.defId];
+    if (def?.recipes && def.recipes.length > 0) {
+      const best = getBestUnlockedRecipe(state, def);
+      if (best && bld.activeRecipeId !== best.id) {
+        bld.activeRecipeId = best.id;
+      }
+    }
+  }
+
   // 1. Storage capacity
   let cap = BASE_WAREHOUSE_CAPACITY;
   for (const bld of Object.values(state.buildings)) {
@@ -1171,12 +1203,39 @@ export function stepSimulation(state: GameState, dtSeconds: number): void {
     state.netRatesPerMin[resId] = Math.round(rateAccumulator[resId] * 10) / 10;
   }
 
+  recalculateNetworkAndCapacities(state);
+
   // 5. Advance Colonial Calendar & Trigger Historical Events
   state.dayProgress += dtSeconds / SECONDS_PER_DAY;
   while (state.dayProgress >= 1) {
     state.dayProgress -= 1;
     state.day += 1;
+    if (
+      state.activeEventId &&
+      state.eventDeferred &&
+      state.activeEventDeadlineDay !== null &&
+      state.day >= state.activeEventDeadlineDay
+    ) {
+      const activeEvt = HISTORICAL_EVENTS.find((e) => e.id === state.activeEventId);
+      const anyAffordable = activeEvt
+        ? activeEvt.choices.some((c) => canAffordEventChoice(state, c).ok)
+        : true;
+      if (!anyAffordable) {
+        // Extend the deadline by 1 day so an expired deferred event never deadlocks play when no choice is affordable
+        state.activeEventDeadlineDay = state.day + 1;
+      } else {
+        // Deferred decision window expired — reopen the event modal for final resolution
+        state.eventDeferred = false;
+        state.speed = 0;
+        state.dayProgress = 0;
+        break;
+      }
+    }
     checkAndTriggerHistoricalEvents(state);
+    if (state.activeEventId && !state.eventDeferred) {
+      state.dayProgress = 0;
+      break;
+    }
   }
 
   recalculateNetworkAndCapacities(state);
@@ -1366,29 +1425,36 @@ export function evaluateTutorialProgress(
       // Advance the active step pointer unless the user is intentionally browsing an earlier step while the guide is open
       const canAutoAdvance =
         !state.tutorialBrowsingManually || !state.tutorialActive || state.tutorialStepIndex === step.index;
-      if (canAutoAdvance && state.tutorialStepIndex <= step.index) {
+      if (canAutoAdvance) {
         completedStepTitle = step.title;
         advanced = true;
         state.tutorialBrowsingManually = false;
-        while (
-          state.tutorialStepIndex < TUTORIAL_STEPS.length &&
-          state.completedTutorialStepIds.includes(TUTORIAL_STEPS[state.tutorialStepIndex].id)
-        ) {
-          state.tutorialStepIndex += 1;
-          if (
-            state.tutorialStepIndex < TUTORIAL_STEPS.length &&
-            TUTORIAL_STEPS[state.tutorialStepIndex].id === 'unseal_future_knowledge'
-          ) {
-            unsealFutureTrunks(state);
-          }
-        }
-        if (state.tutorialStepIndex >= TUTORIAL_STEPS.length) {
+        const firstIncomplete = TUTORIAL_STEPS.findIndex(
+          (s) => !state.completedTutorialStepIds.includes(s.id)
+        );
+        if (firstIncomplete === -1) {
           state.tutorialStepIndex = TUTORIAL_STEPS.length - 1;
           state.tutorialCompleted = true;
           state.tutorialActive = false;
+        } else {
+          state.tutorialStepIndex = firstIncomplete;
+          if (TUTORIAL_STEPS[firstIncomplete].id === 'unseal_future_knowledge') {
+            unsealFutureTrunks(state);
+          }
         }
       }
     }
+  }
+
+  // Also ensure that if all steps are already satisfied (e.g. after a reordered step migration), the tutorial marks completed
+  if (
+    !state.tutorialCompleted &&
+    !state.tutorialBrowsingManually &&
+    TUTORIAL_STEPS.every((s) => state.completedTutorialStepIds.includes(s.id))
+  ) {
+    state.tutorialStepIndex = TUTORIAL_STEPS.length - 1;
+    state.tutorialCompleted = true;
+    state.tutorialActive = false;
   }
 
   return { advanced, completedStepTitle };
@@ -1694,10 +1760,41 @@ export function skipTutorial(state: GameState): void {
   state.tutorialCompleted = true;
 }
 
+export function deferHistoricalEvent(state: GameState): boolean {
+  if (!state.activeEventId) return false;
+  const activeEvt = HISTORICAL_EVENTS.find((e) => e.id === state.activeEventId);
+  const anyAffordable = activeEvt
+    ? activeEvt.choices.some((c) => canAffordEventChoice(state, c).ok)
+    : true;
+  if (
+    state.activeEventDeadlineDay !== null &&
+    state.day >= state.activeEventDeadlineDay &&
+    anyAffordable
+  ) {
+    return false;
+  }
+  if (state.activeEventDeadlineDay !== null && state.day >= state.activeEventDeadlineDay) {
+    state.activeEventDeadlineDay = state.day + 2;
+  }
+  state.eventDeferred = true;
+  if (state.speed === 0) {
+    state.speed = 1;
+  }
+  return true;
+}
+
+export function reopenDeferredEvent(state: GameState): boolean {
+  if (!state.activeEventId) return false;
+  state.eventDeferred = false;
+  state.speed = 0;
+  return true;
+}
+
 export function checkAndTriggerHistoricalEvents(state: GameState): void {
   if (state.activeEventId) return;
-  // Do not interrupt the player before they have established their landing or while actively in the early survival steps (Steps 1–6)
-  if (state.tutorialActive && !state.tutorialCompleted && state.tutorialStepIndex < 6) return;
+  // Do not interrupt the player before they have established their landing or while actively in the tutorial steps (Steps 1–9, including building the Academy)
+  if (state.tutorialActive && !state.tutorialCompleted && state.tutorialStepIndex < 9) return;
+  if (!state.trunksUnsealed && !state.tutorialCompleted) return;
   const hasWarehouse = Object.values(state.buildings).some((b) => b.defId === 'founding_camp');
   if (!hasWarehouse) return;
 
@@ -1715,7 +1812,9 @@ export function checkAndTriggerHistoricalEvents(state: GameState): void {
     if (!evt.choices.some((c) => canAffordEventChoice(state, c).ok)) continue;
 
     state.activeEventId = evt.id;
-    state.speed = 0; // Pause so the player can weigh their historical decision
+    state.activeEventDeadlineDay = state.day + EVENT_DECISION_WINDOW_DAYS;
+    state.eventDeferred = false;
+    state.speed = 0; // Pause so the player can weigh their historical decision (or choose Decide Later)
     break;
   }
 }

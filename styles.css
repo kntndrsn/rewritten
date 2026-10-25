@@ -161,6 +161,17 @@ body {
   box-shadow: 0 0 12px rgba(168, 85, 247, 0.75);
 }
 
+.btn-pending-event {
+  background: linear-gradient(135deg, #b45309, #d97706);
+  border-color: #fbbf24;
+  color: #fef3c7;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.55);
+}
+
+.btn-pending-event.hidden {
+  display: none;
+}
+
 .badge-dot {
   display: inline-block;
   background: #fde047;
@@ -349,7 +360,7 @@ body {
 
 /* Right Sidebar */
 .right-sidebar {
-  width: 245px;
+  width: 265px;
   background: var(--bg-panel);
   border-left: 1px solid var(--border-subtle);
   display: flex;
@@ -358,6 +369,10 @@ body {
   padding: 7px;
   overflow-y: auto;
   flex-shrink: 0;
+}
+
+.right-sidebar.sidebar-hidden {
+  display: none !important;
 }
 
 .panel-card {
@@ -955,7 +970,40 @@ body {
 
 /* Events & Chronicle */
 .event-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-bottom: 10px;
+}
+
+.event-deadline-pill {
+  display: inline-block;
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.55);
+  color: #fde047;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.btn-defer-event {
+  width: 100%;
+  margin-top: 12px;
+  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  color: #fde68a;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn-defer-event:hover {
+  background: rgba(51, 65, 85, 0.95);
 }
 
 .event-year-pill {
@@ -1166,7 +1214,7 @@ body {
 }
 
 .mobile-sidebar-header {
-  display: none;
+  display: flex;
   justify-content: space-between;
   align-items: center;
   padding-bottom: 6px;
@@ -1178,6 +1226,23 @@ body {
 }
 
 .mobile-tutorial-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: min(420px, calc(100% - 16px));
+  background: rgba(15, 23, 42, 0.93);
+  border: 1px solid rgba(245, 158, 11, 0.65);
+  border-radius: 8px;
+  padding: 7px 10px;
+  z-index: 16;
+  font-size: 11px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+}
+
+.mobile-tutorial-bar.hidden {
   display: none;
 }
 

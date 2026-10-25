@@ -14,6 +14,7 @@ import {
   canPlaceBuilding,
   canUnlockTech,
   canUpgradeHouse,
+  deferHistoricalEvent,
   demolishTile,
   dismissTutorial,
   getColonialYearString,
@@ -24,6 +25,7 @@ import {
   hasEnoughResources,
   isTutorialStepSatisfied,
   placeBuilding,
+  reopenDeferredEvent,
   resolveHistoricalEvent,
   setBuildingRecipe,
   stepTutorial,
@@ -42,7 +44,7 @@ export class GameUI {
 
   private activeCategory: BuildingCategory | 'all' = 'all';
   private activeModal: 'tech' | 'chronicle' | null = null;
-  private lastRenderedEventId: string | null = null;
+  private lastRenderedEventKey = '';
   private lastTutorialStepIndex = -1;
   private lastTutorialActive = false;
   private renderedInspectorKey = '';
@@ -54,6 +56,7 @@ export class GameUI {
     this.onResetGame = onResetGame;
 
     this.bindStaticControls();
+    this.setSidebarVisible(false);
     this.renderBuildToolbar();
     this.renderInspector(true);
     this.renderTutorialPanel();
@@ -66,9 +69,10 @@ export class GameUI {
 
   public setState(newState: GameState): void {
     this.state = newState;
-    this.lastRenderedEventId = null;
+    this.lastRenderedEventKey = '';
     this.lastTutorialStepIndex = -1;
     this.renderedInspectorKey = '';
+    this.setSidebarVisible(false);
     this.renderBuildToolbar();
     this.renderInspector(true);
     this.renderTutorialPanel();
@@ -79,6 +83,14 @@ export class GameUI {
       this.renderIntroModal(false);
     }
     this.updateHUD();
+  }
+
+  public setSidebarVisible(visible: boolean): void {
+    const sb = document.getElementById('right-sidebar');
+    if (!sb) return;
+    sb.classList.toggle('sidebar-hidden', !visible);
+    sb.classList.toggle('mobile-open', visible);
+    this.renderer.resize();
   }
 
   public showToast(message: string, tone: 'info' | 'success' | 'warn' = 'info'): void {
@@ -125,16 +137,23 @@ export class GameUI {
 
     document.getElementById('btn-toggle-sidebar')?.addEventListener('click', () => {
       const sb = document.getElementById('right-sidebar');
-      sb?.classList.toggle('mobile-open');
+      const isHidden = sb?.classList.contains('sidebar-hidden') ?? true;
+      this.renderInspector(true);
+      this.setSidebarVisible(isHidden);
     });
 
     document.getElementById('btn-close-sidebar')?.addEventListener('click', () => {
-      const sb = document.getElementById('right-sidebar');
-      sb?.classList.remove('mobile-open');
+      this.renderer.selectedTile = null;
+      this.renderInspector(true);
+      this.setSidebarVisible(false);
     });
 
-    document.getElementById('btn-open-intro')?.addEventListener('click', () => {
-      this.renderIntroModal(true);
+    document.getElementById('btn-reopen-event')?.addEventListener('click', () => {
+      if (reopenDeferredEvent(this.state)) {
+        this.lastRenderedEventKey = '';
+        this.renderEventModal();
+        this.updateHUD();
+      }
     });
 
     document.getElementById('btn-center-camera')?.addEventListener('click', () => {
@@ -151,6 +170,15 @@ export class GameUI {
     });
 
     document.getElementById('btn-reset-game')?.addEventListener('click', () => {
+      document.getElementById('modal-confirm-reset')?.classList.remove('hidden');
+    });
+
+    document.getElementById('btn-cancel-reset')?.addEventListener('click', () => {
+      document.getElementById('modal-confirm-reset')?.classList.add('hidden');
+    });
+
+    document.getElementById('btn-confirm-reset')?.addEventListener('click', () => {
+      document.getElementById('modal-confirm-reset')?.classList.add('hidden');
       clearSavedGame();
       this.onResetGame();
       this.showToast('Started a fresh 1607 expedition timeline.', 'info');
@@ -214,12 +242,13 @@ export class GameUI {
         const res = placeBuilding(this.state, defId, x, y);
         if (res.success) {
           const def = BUILDINGS[defId];
-          this.showToast(`Constructed ${def.name}.`, 'success');
-          this.renderer.selectedTile = { x, y };
-          // After placing the first free Temporal Landing, switch back to select or next tutorial tool
-          if (defId === 'founding_camp') {
+          this.showToast(`Constructing ${def.name}...`, 'success');
+          // Clear build tool selection immediately for all buildings except roads
+          if (!def.isRoad) {
             this.renderer.tool = { mode: 'select' };
           }
+          this.renderer.selectedTile = null;
+          this.setSidebarVisible(false);
           this.renderBuildToolbar();
           this.renderInspector(true);
           this.renderTutorialPanel();
@@ -230,12 +259,24 @@ export class GameUI {
         return;
       }
 
-      // Select mode
-      this.renderer.selectedTile = { x, y };
-      this.renderInspector(true);
+      // Select mode: clicking a building or mineral deposit selects it and opens the right panel;
+      // clicking empty non-deposit ground or clicking the already-selected tile unselects it and hides the right panel!
       const clickedTile = getTile(this.state, x, y);
-      if (window.innerWidth <= 768 && clickedTile?.buildingId) {
-        document.getElementById('right-sidebar')?.classList.add('mobile-open');
+      const isSameTile =
+        this.renderer.selectedTile?.x === x && this.renderer.selectedTile?.y === y;
+      const isDepositTile =
+        clickedTile &&
+        !clickedTile.buildingId &&
+        (clickedTile.terrain === 'stone_deposit' || clickedTile.terrain === 'iron_deposit');
+
+      if ((!clickedTile?.buildingId && !isDepositTile) || isSameTile) {
+        this.renderer.selectedTile = null;
+        this.setSidebarVisible(false);
+        this.renderInspector(true);
+      } else {
+        this.renderer.selectedTile = { x, y };
+        this.setSidebarVisible(true);
+        this.renderInspector(true);
       }
     });
 
@@ -361,9 +402,24 @@ export class GameUI {
       techBtn.innerHTML = `⏳ Future Knowledge (${unlockedCount}/${TECHNOLOGY_LIST.length})${canBuyAnyTech ? ' <span class="badge-dot">!</span>' : ''}`;
     }
 
-    // Check if an active Historical Event needs to be shown
-    if (this.state.activeEventId !== this.lastRenderedEventId) {
-      this.lastRenderedEventId = this.state.activeEventId;
+    // Pending / Deferred Event Top-Bar Button & Modal state
+    const reopenEvtBtn = document.getElementById('btn-reopen-event');
+    const daysLeft =
+      this.state.activeEventId && this.state.activeEventDeadlineDay !== null
+        ? Math.max(0, this.state.activeEventDeadlineDay - this.state.day)
+        : 0;
+    if (reopenEvtBtn) {
+      if (this.state.activeEventId && this.state.eventDeferred) {
+        reopenEvtBtn.classList.remove('hidden');
+        reopenEvtBtn.textContent = `⚠️ Pending Event (${daysLeft}d left)`;
+      } else {
+        reopenEvtBtn.classList.add('hidden');
+      }
+    }
+
+    const eventKey = `${this.state.activeEventId ?? 'none'}:${this.state.eventDeferred}:${daysLeft}:${Math.floor(this.state.resources.insight)}`;
+    if (eventKey !== this.lastRenderedEventKey) {
+      this.lastRenderedEventKey = eventKey;
       this.renderEventModal();
     }
 
@@ -519,19 +575,51 @@ export class GameUI {
     this.renderedInspectorKey = nextKey;
 
     if (!bld) {
+      const depositIcon =
+        tile.terrain === 'stone_deposit'
+          ? '🪨'
+          : tile.terrain === 'iron_deposit'
+            ? '⛏️'
+            : '🗺️';
+      const depositBuildId =
+        tile.terrain === 'stone_deposit'
+          ? 'quarry'
+          : tile.terrain === 'iron_deposit'
+            ? 'iron_mine'
+            : null;
+      const depositBldDef = depositBuildId ? BUILDINGS[depositBuildId] : null;
+
       panel.innerHTML = `
         <div class="inspector-section">
           <div class="inspector-header">
-            <span class="inspector-icon">🗺️</span>
+            <span class="inspector-icon">${depositIcon}</span>
             <div>
               <h4>${tDef.name}</h4>
-              <span class="coords-tag">Tile (${tile.x}, ${tile.y})</span>
+              <span class="coords-tag">${tDef.resourceHint ?? 'Colonial Terrain'}</span>
             </div>
           </div>
           <p class="inspector-desc">${tDef.description}</p>
           ${tDef.resourceHint ? `<div class="hint-chip">✨ ${tDef.resourceHint}</div>` : ''}
+          ${
+            depositBldDef
+              ? `<div class="inspector-actions">
+                  <button id="btn-select-deposit-extractor" type="button" class="btn-primary">
+                    ${depositBldDef.icon} Select ${depositBldDef.name}
+                  </button>
+                </div>`
+              : ''
+          }
         </div>
       `;
+
+      if (depositBuildId && depositBldDef) {
+        document.getElementById('btn-select-deposit-extractor')?.addEventListener('click', () => {
+          this.renderer.tool = { mode: 'build', defId: depositBuildId };
+          this.setSidebarVisible(false);
+          this.renderBuildToolbar();
+          this.showToast(`Selected ${depositBldDef.name}. Place it on or adjacent to ${tDef.name}!`, 'info');
+        });
+      }
       return;
     }
 
@@ -616,39 +704,38 @@ export class GameUI {
       `;
     }
 
-    // Production Recipes Block
+    // Production Recipes Block (Automatically uses the best unlocked process)
     let recipesHtml = '';
     if (def.recipes && def.recipes.length > 0 && bld.isConstructed !== false) {
       const activeRecipe =
         def.recipes.find((r) => r.id === bld.activeRecipeId) ?? def.recipes[0];
       const pct = Math.min(100, Math.round((bld.progressSeconds / activeRecipe.cycleSeconds) * 100));
 
-      const recipeCards = def.recipes
+      const inputsStr =
+        Object.entries(activeRecipe.inputs)
+          .map(([k, v]) => `${v} ${RESOURCES[k as ResourceId].icon}`)
+          .join(' + ') || 'Natural Harvest';
+      const outputsStr = Object.entries(activeRecipe.outputs)
+        .map(([k, v]) => `${v} ${RESOURCES[k as ResourceId].icon}`)
+        .join(' + ');
+
+      const lockedUpgrades = def.recipes.filter(
+        (r) => r.requiredTechId && !this.state.unlockedTechIds.includes(r.requiredTechId)
+      );
+      const lockedPreviewHtml = lockedUpgrades
         .map((r) => {
-          const unlocked = !r.requiredTechId || this.state.unlockedTechIds.includes(r.requiredTechId);
-          const isSelected = r.id === activeRecipe.id;
-          const inputsStr =
+          const uIn =
             Object.entries(r.inputs)
               .map(([k, v]) => `${v} ${RESOURCES[k as ResourceId].icon}`)
               .join(' + ') || 'Natural Harvest';
-          const outputsStr = Object.entries(r.outputs)
+          const uOut = Object.entries(r.outputs)
             .map(([k, v]) => `${v} ${RESOURCES[k as ResourceId].icon}`)
             .join(' + ');
-
           return `
-            <button type="button" class="recipe-option ${isSelected ? 'active' : ''} ${unlocked ? '' : 'locked'}" data-recipe-id="${r.id}" aria-pressed="${isSelected}">
-              <div class="recipe-head">
-                <strong>${r.name}</strong>
-                ${r.isAnachronistic ? '<span class="anach-tag">⏳ Future Method</span>' : ''}
-              </div>
-              <div class="recipe-io">${inputsStr} ➔ <strong>${outputsStr}</strong> (${r.cycleSeconds}s)</div>
-              <div class="recipe-desc">${r.description}</div>
-              ${
-                !unlocked
-                  ? `<div class="recipe-lock-note">🔒 Requires ${TECHNOLOGIES[r.requiredTechId!]?.name}</div>`
-                  : ''
-              }
-            </button>
+            <div class="recipe-lock-note" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border-subtle);">
+              🔒 <strong>Future Upgrade (${TECHNOLOGIES[r.requiredTechId!]?.name}):</strong><br/>
+              ${r.name} (${uIn} ➔ ${uOut} every ${r.cycleSeconds}s)
+            </div>
           `;
         })
         .join('');
@@ -662,8 +749,16 @@ export class GameUI {
           <div class="progress-bar-outer">
             <div id="insp-progress-bar" class="progress-bar-inner" style="width: ${pct}%"></div>
           </div>
-          <h5>Production Method (Click to Switch)</h5>
-          <div class="recipe-list">${recipeCards}</div>
+          <h5>Active Production Process</h5>
+          <div class="recipe-option active" style="cursor: default;">
+            <div class="recipe-head">
+              <strong>${activeRecipe.name}</strong>
+              ${activeRecipe.isAnachronistic ? '<span class="anach-tag">⏳ Upgraded Process</span>' : ''}
+            </div>
+            <div class="recipe-io">${inputsStr} ➔ <strong>${outputsStr}</strong> (${activeRecipe.cycleSeconds}s)</div>
+            <div class="recipe-desc">${activeRecipe.description}</div>
+            ${lockedPreviewHtml}
+          </div>
         </div>
       `;
     }
@@ -716,26 +811,6 @@ export class GameUI {
       }
     });
 
-    // Bind recipe switching
-    panel.querySelectorAll<HTMLButtonElement>('[data-recipe-id]').forEach((el) => {
-      el.addEventListener('click', () => {
-        const rId = el.dataset.recipeId!;
-        const recipe = def.recipes?.find((r) => r.id === rId);
-        if (recipe?.requiredTechId && !this.state.unlockedTechIds.includes(recipe.requiredTechId)) {
-          this.showToast(
-            `Unlock "${TECHNOLOGIES[recipe.requiredTechId]?.name}" in Future Knowledge first!`,
-            'warn'
-          );
-          this.openModal('tech');
-          return;
-        }
-        if (setBuildingRecipe(this.state, bld.id, rId)) {
-          this.showToast(`Switched production to ${recipe?.name}.`, 'success');
-          this.updateInspectorLiveValues(bld);
-        }
-      });
-    });
-
     // Bind pause button
     document.getElementById('btn-toggle-pause')?.addEventListener('click', () => {
       toggleBuildingPaused(this.state, bld.id);
@@ -748,6 +823,8 @@ export class GameUI {
       const res = demolishTile(this.state, bld.x, bld.y);
       if (res.success) {
         this.showToast('Structure dismantled (50% materials refunded).', 'info');
+        this.renderer.selectedTile = null;
+        this.setSidebarVisible(false);
         this.renderInspector(true);
         this.updateHUD();
       } else if (res.reason) {
@@ -1031,7 +1108,7 @@ export class GameUI {
     const body = document.getElementById('event-modal-body');
     if (!modal || !body) return;
 
-    if (!this.state.activeEventId) {
+    if (!this.state.activeEventId || this.state.eventDeferred) {
       modal.classList.add('hidden');
       return;
     }
@@ -1043,6 +1120,18 @@ export class GameUI {
     }
 
     modal.classList.remove('hidden');
+    const daysLeft =
+      this.state.activeEventDeadlineDay !== null
+        ? Math.max(0, this.state.activeEventDeadlineDay - this.state.day)
+        : 0;
+    const anyChoiceAffordable = evt.choices.some((c) => canAffordEventChoice(this.state, c).ok);
+    const canDeferNow = daysLeft > 0 || !anyChoiceAffordable;
+    const deadlineText =
+      daysLeft > 0
+        ? `⏳ Decision Window: ${daysLeft} Colonial Day${daysLeft === 1 ? '' : 's'} Left`
+        : anyChoiceAffordable
+          ? `⏰ Final Day — Decision Required Now`
+          : `⏳ Gathering Required Supplies...`;
 
     const choicesHtml = evt.choices
       .map((c) => {
@@ -1100,15 +1189,37 @@ export class GameUI {
 
     body.innerHTML = `
       <div class="event-header">
-        <span class="event-year-pill">📅 ${evt.year}</span>
-        <h3>${evt.title}</h3>
+        <div>
+          <span class="event-year-pill">📅 ${evt.year}</span>
+          <h3>${evt.title}</h3>
+        </div>
+        <span class="event-deadline-pill">${deadlineText}</span>
       </div>
       <p class="event-description">${evt.description}</p>
       <div class="historical-note">
         <strong>📖 Original Timeline Record:</strong> ${evt.historicalContext}
       </div>
       <div class="event-choices-list">${choicesHtml}</div>
+      ${
+        canDeferNow
+          ? `<button id="btn-defer-event" type="button" class="btn-defer-event">
+              ⏳ Decide Later (${daysLeft > 0 ? `${daysLeft}d left — ` : ''}Gather Insight & Supplies First)
+            </button>`
+          : ''
+      }
     `;
+
+    document.getElementById('btn-defer-event')?.addEventListener('click', () => {
+      if (deferHistoricalEvent(this.state)) {
+        this.lastRenderedEventKey = '';
+        modal.classList.add('hidden');
+        this.showToast(
+          `Deferred "${evt.title}" (${daysLeft}d remaining). Click ⚠️ Pending Event in the top bar anytime!`,
+          'info'
+        );
+        this.updateHUD();
+      }
+    });
 
     body.querySelectorAll<HTMLButtonElement>('[data-choice-id]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -1116,7 +1227,7 @@ export class GameUI {
         const res = resolveHistoricalEvent(this.state, evt.id, choiceId);
         if (res.success) {
           this.state.speed = 1;
-          this.lastRenderedEventId = null;
+          this.lastRenderedEventKey = '';
           modal.classList.add('hidden');
           this.showToast(res.outcomeText ?? 'Timeline updated.', 'success');
           this.updateHUD();

@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  EVENT_DECISION_WINDOW_DAYS,
   MIN_DAYS_BETWEEN_EVENTS,
   SECONDS_PER_DAY,
   canPlaceBuilding,
@@ -8,12 +9,14 @@ import {
   canUpgradeHouse,
   checkAndTriggerHistoricalEvents,
   createInitialGameState,
+  deferHistoricalEvent,
   demolishTile,
   dismissTutorial,
   getDynamicTutorialTargets,
   getEffectiveBuildingCost,
   isTutorialStepSatisfied,
   placeBuilding,
+  reopenDeferredEvent,
   resolveHistoricalEvent,
   skipTutorial,
   stepSimulation,
@@ -124,9 +127,10 @@ describe('Rewritten Core Simulation Engine', () => {
     assert.equal(unsealFutureTrunks(state), false);
     assert.equal(state.resources.insight, insightAfterUnseal);
 
-    // Step 8: Unlock first Future Knowledge breakthrough -> advances to Step 9
+    // Step 8: Unlock first Future Knowledge breakthrough -> advances to Step 9 (How to Gain More Future Insight: Academy)
     unlockTech(state, 'water_circular_saw');
     assert.equal(state.tutorialStepIndex, 8);
+    assert.equal(TUTORIAL_STEPS[state.tutorialStepIndex].id, 'build_academy');
   });
 
   it('keeps tutorial text free of coordinate numbers and Anno references', () => {
@@ -215,9 +219,12 @@ describe('Rewritten Core Simulation Engine', () => {
     );
   });
 
-  it('unlocks Future Knowledge breakthroughs and switches buildings to anachronistic recipes', () => {
+  it('unlocks Future Knowledge breakthroughs and automatically applies upgraded recipes to both existing and newly built buildings', () => {
     const state = createInitialGameState(1607, true);
-    state.resources.insight = 30;
+    state.resources.insight = 60;
+    state.resources.wood = 60;
+    state.resources.planks = 30;
+    state.resources.coin = 200;
     placeBuilding(state, 'sawmill', 9, 7);
     stepSimulation(state, 8.5);
 
@@ -234,7 +241,17 @@ describe('Rewritten Core Simulation Engine', () => {
     assert.equal(
       sawmill?.activeRecipeId,
       'circular_saw_planks',
-      'Sawmill should automatically upgrade to the anachronistic circular saw recipe'
+      'Existing Sawmill should automatically upgrade to the anachronistic circular saw recipe'
+    );
+
+    // Unlock crop_rotation and then place a brand new wheat_farm on fertile_soil (8, 10)
+    unlockTech(state, 'crop_rotation');
+    const newFarm = placeBuilding(state, 'wheat_farm', 8, 10);
+    assert.equal(newFarm.success, true);
+    assert.equal(
+      newFarm.building?.activeRecipeId,
+      'four_course_seed_drill',
+      'Newly placed Wheat Farm should automatically use the upgraded Norfolk 4-Course recipe'
     );
   });
 
@@ -274,15 +291,38 @@ describe('Rewritten Core Simulation Engine', () => {
     assert.equal(cabin.defId, 'enlightened_manor');
   });
 
-  it('triggers and resolves historical events only after tutorial and day/population thresholds', () => {
+  it('triggers historical events at later days, supports deferring with a countdown timer, and resolves with butterfly effects', () => {
     const state = createInitialGameState(1607, true);
     skipTutorial(state);
+    state.resources.wood = 40;
     placeBuilding(state, 'pioneer_cabin', 8, 9);
     placeBuilding(state, 'pioneer_cabin', 9, 9);
-    // Advance 9 days (9 * 25s = 225s) with enough fish so population reaches >= 16
+    // Advance 15 days (15 * 25s = 375s) with enough fish so population reaches >= 16
     state.resources.fish = 200;
-    stepSimulation(state, 225);
+    stepSimulation(state, 375);
     assert.equal(state.activeEventId, 'starving_winter_1609');
+    assert.equal(state.activeEventDeadlineDay, state.day + EVENT_DECISION_WINDOW_DAYS);
+    assert.equal(state.eventDeferred, false);
+
+    // Defer the event ("Decide Later") so simulation can continue while gathering Insight
+    const deferred = deferHistoricalEvent(state);
+    assert.equal(deferred, true);
+    assert.equal(state.eventDeferred, true);
+    assert.equal(state.speed, 1);
+
+    // Advance 2 days while deferred — event stays deferred
+    stepSimulation(state, 50);
+    assert.equal(state.eventDeferred, true);
+
+    // Advance past the 5-day decision window — event automatically reopens and pauses
+    stepSimulation(state, 75);
+    assert.equal(state.eventDeferred, false);
+    assert.equal(state.speed, 0);
+
+    // Also test manual reopen helper
+    state.eventDeferred = true;
+    reopenDeferredEvent(state);
+    assert.equal(state.eventDeferred, false);
 
     state.resources.insight = 25;
     state.resources.wood = 20;
@@ -291,6 +331,7 @@ describe('Rewritten Core Simulation Engine', () => {
     const res = resolveHistoricalEvent(state, 'starving_winter_1609', 'cold_frame_root_cellars');
     assert.equal(res.success, true);
     assert.equal(state.activeEventId, null);
+    assert.equal(state.activeEventDeadlineDay, null);
     assert.ok(state.divergence > prevDiv);
     assert.equal(state.chronicle.length, prevChronLen + 1);
   });
@@ -325,7 +366,7 @@ describe('Rewritten Core Simulation Engine', () => {
     const state = createInitialGameState(1607, true);
     skipTutorial(state);
     state.completedEventIds.push('starving_winter_1609');
-    state.day = 18;
+    state.day = 26;
     state.totalPopulation = 24;
     state.resources.tools = 0; // indigenous_envoy_1611 requires 4 or 6 tools
 
@@ -343,8 +384,8 @@ describe('Rewritten Core Simulation Engine', () => {
     resolveHistoricalEvent(state, 'indigenous_envoy_1611', 'guarded_barter');
 
     // Enforces MIN_DAYS_BETWEEN_EVENTS cooldown before next event can trigger
-    assert.equal(state.lastEventDay, 18);
-    state.day = 24;
+    assert.equal(state.lastEventDay, 26);
+    state.day = 30;
     state.totalPopulation = 30;
     checkAndTriggerHistoricalEvents(state);
     assert.equal(
@@ -353,7 +394,7 @@ describe('Rewritten Core Simulation Engine', () => {
       `Should enforce ${MIN_DAYS_BETWEEN_EVENTS}-day cooldown between historical events`
     );
 
-    state.day = 18 + MIN_DAYS_BETWEEN_EVENTS;
+    state.day = 26 + MIN_DAYS_BETWEEN_EVENTS;
     checkAndTriggerHistoricalEvents(state);
     assert.equal(state.activeEventId, 'marsh_fever_outbreak');
 
@@ -416,7 +457,7 @@ describe('Rewritten Core Simulation Engine', () => {
     placeBuilding(state, 'market_square', 9, 7);
     placeBuilding(state, 'quarry', 13, 6);
     // Use dynamic road pathfinder to connect the quarry at (13, 6) to the warehouse at (7, 8)
-    state.tutorialStepIndex = 8; // quarry_and_upgrade
+    state.tutorialStepIndex = 9; // quarry_and_upgrade
     const roadTiles = getDynamicTutorialTargets(state);
     for (const rt of roadTiles) {
       placeBuilding(state, 'dirt_road', rt.x, rt.y);
@@ -460,6 +501,35 @@ describe('Rewritten Core Simulation Engine', () => {
       'Dynamically recommended cabin site near arbitrary landing (15, 6) must be connected'
     );
     assert.equal(state.tutorialStepIndex, 2);
+  });
+
+  it('extends deferred event deadline if no choice is affordable at expiry and completes reordered tutorial steps', () => {
+    const state = createInitialGameState(1607, true);
+    skipTutorial(state);
+    state.completedEventIds.push('starving_winter_1609');
+    state.day = 25;
+    state.lastEventDay = 1;
+    state.totalPopulation = 24;
+    state.resources.tools = 4;
+
+    checkAndTriggerHistoricalEvents(state);
+    assert.equal(state.activeEventId, 'indigenous_envoy_1611');
+    assert.equal(deferHistoricalEvent(state), true);
+
+    // Spend all tools before the 5-day deadline expires
+    state.resources.tools = 0;
+    stepSimulation(state, 5 * SECONDS_PER_DAY);
+    assert.equal(
+      state.eventDeferred,
+      true,
+      'Deferred event should stay deferred and extend deadline when no choice is affordable at expiry'
+    );
+    assert.ok((state.activeEventDeadlineDay ?? 0) > state.day);
+
+    // Once tools are available again, the next day reopens the event cleanly
+    state.resources.tools = 4;
+    stepSimulation(state, SECONDS_PER_DAY);
+    assert.equal(state.eventDeferred, false);
   });
 });
 
