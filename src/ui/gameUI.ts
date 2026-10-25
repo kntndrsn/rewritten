@@ -17,6 +17,7 @@ import {
   demolishTile,
   dismissTutorial,
   getColonialYearString,
+  getDynamicTutorialTargets,
   getEffectiveBuildingCost,
   getEffectiveEventChoiceCost,
   getTile,
@@ -1312,8 +1313,9 @@ export class GameUI {
       btn.addEventListener('click', () => {
         if (!step.recommendedBuildDefId) return;
         this.renderer.tool = { mode: 'build', defId: step.recommendedBuildDefId };
-        if (step.highlightTiles && step.highlightTiles.length > 0) {
-          const t = step.highlightTiles[0];
+        const dynamicTargets = getDynamicTutorialTargets(this.state, step);
+        if (dynamicTargets.length > 0) {
+          const t = dynamicTargets[0];
           this.renderer.centerOnTile(t.x, t.y);
         }
         this.renderBuildToolbar();

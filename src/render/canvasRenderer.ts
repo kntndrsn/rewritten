@@ -6,6 +6,7 @@ import {
   type PlacedBuilding,
   canPlaceBuilding,
   canUpgradeHouse,
+  getDynamicTutorialTargets,
   getOrthogonalNeighbors,
   getTile
 } from '../core/simulation.ts';
@@ -239,20 +240,27 @@ export class CanvasRenderer {
       { passive: false }
     );
 
-    this.canvas.addEventListener('touchend', (e) => {
-      if (!this.touchMoved && e.changedTouches.length === 1) {
-        const t = e.changedTouches[0];
-        const coords = this.screenToTile(t.clientX, t.clientY);
-        this.hoveredTile = coords;
-        if (coords && this.onTileClickCallback) {
-          this.onTileClickCallback(coords.x, coords.y, 0);
+    this.canvas.addEventListener(
+      'touchend',
+      (e) => {
+        if (!this.touchMoved && e.changedTouches.length === 1) {
+          if (e.cancelable) {
+            e.preventDefault();
+          }
+          const t = e.changedTouches[0];
+          const coords = this.screenToTile(t.clientX, t.clientY);
+          this.hoveredTile = coords;
+          if (coords && this.onTileClickCallback) {
+            this.onTileClickCallback(coords.x, coords.y, 0);
+          }
         }
-      }
-      if (e.touches.length === 0) {
-        this.isTouchPanning = false;
-        this.lastPinchDist = 0;
-      }
-    });
+        if (e.touches.length === 0) {
+          this.isTouchPanning = false;
+          this.lastPinchDist = 0;
+        }
+      },
+      { passive: false }
+    );
   }
 
   public screenToTile(clientX: number, clientY: number): { x: number; y: number } | null {
@@ -871,11 +879,13 @@ export class CanvasRenderer {
   ): void {
     if (!state.tutorialActive) return;
     const step = TUTORIAL_STEPS[state.tutorialStepIndex];
-    if (!step?.highlightTiles) return;
+    if (!step) return;
+    const targets = getDynamicTutorialTargets(state, step);
+    if (targets.length === 0) return;
 
     const pulse = (Math.sin(this.animTime * 4) + 1) * 0.5;
 
-    for (const target of step.highlightTiles) {
+    for (const target of targets) {
       const px = this.camera.offsetX + target.x * ts;
       const py = this.camera.offsetY + target.y * ts;
 

@@ -171,7 +171,7 @@ export const TUTORIAL_STEPS: TutorialStepDefinition[] = [
     narrative:
       'To unlock more Future Knowledge, you need a steady stream of Future Insight. Quarrying Cut Stone (+8 Insight milestone) and upgrading Pioneer Cabins into Colonial Homesteads (+8 Insight milestone) fuels the next era.',
     objectiveText:
-      'Build a connected "Stone Quarry" by the northern Granite Outcrop, then upgrade a supplied Pioneer Cabin into a "Colonial Homestead".',
+      'Build a connected "Stone Quarry" by the Granite Outcrop and upgrade a supplied Pioneer Cabin into a "Colonial Homestead".',
     recommendedBuildDefId: 'quarry',
     recommendedCategory: 'gathering',
     highlightTiles: [

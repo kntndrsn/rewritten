@@ -3,7 +3,7 @@ import { HISTORICAL_EVENTS } from '../data/events.ts';
 import { POPULATION_TIERS, POPULATION_TIER_ORDER } from '../data/population.ts';
 import { BASE_WAREHOUSE_CAPACITY, RESOURCES, RESOURCE_ORDER } from '../data/resources.ts';
 import { TECHNOLOGIES } from '../data/technologies.ts';
-import { TUTORIAL_STEPS } from '../data/tutorial.ts';
+import { TUTORIAL_STEPS, type TutorialStepDefinition } from '../data/tutorial.ts';
 import type {
   BuildingDefinition,
   EventChoice,
@@ -90,6 +90,7 @@ export interface GameState {
   tutorialActive: boolean;
   tutorialStepIndex: number;
   tutorialCompleted: boolean;
+  tutorialBrowsingManually?: boolean;
   completedTutorialStepIds: string[];
   achievedMilestoneIds: string[];
   trunksUnsealed: boolean;
@@ -893,7 +894,28 @@ export function getBuildingProductionMultiplier(state: GameState, defId: string)
 export function stepSimulation(state: GameState, dtSeconds: number): void {
   if (dtSeconds <= 0) return;
 
+  // If any building under construction finishes strictly inside (0, dtSeconds),
+  // split the step at the earliest completion boundary so newly completed buildings
+  // only operate for the remaining time after construction finishes.
+  let earliestCompletionDt = Infinity;
+  for (const bld of Object.values(state.buildings)) {
+    if (bld.isConstructed === false) {
+      const targetTime = bld.buildTimeSeconds || 5;
+      const remaining = targetTime - (bld.constructionProgressSeconds || 0);
+      if (remaining > 1e-6 && remaining < dtSeconds - 1e-6 && remaining < earliestCompletionDt) {
+        earliestCompletionDt = remaining;
+      }
+    }
+  }
+
+  if (earliestCompletionDt < Infinity) {
+    stepSimulation(state, earliestCompletionDt);
+    stepSimulation(state, dtSeconds - earliestCompletionDt);
+    return;
+  }
+
   // 0. Advance active building construction sites
+  const justCompletedConstructionIds = new Set<string>();
   for (const bld of Object.values(state.buildings)) {
     if (bld.isConstructed === false) {
       const targetTime = bld.buildTimeSeconds || 5;
@@ -902,8 +924,10 @@ export function stepSimulation(state: GameState, dtSeconds: number): void {
         (bld.constructionProgressSeconds || 0) + dtSeconds
       );
       bld.status = 'constructing';
-      if (bld.constructionProgressSeconds >= targetTime) {
+      if (bld.constructionProgressSeconds + 1e-6 >= targetTime) {
+        bld.constructionProgressSeconds = targetTime;
         bld.isConstructed = true;
+        justCompletedConstructionIds.add(bld.id);
         const def = BUILDINGS[bld.defId];
         if (def?.housing) {
           const otherConstructedHouses = Object.values(state.buildings).filter(
@@ -1001,7 +1025,7 @@ export function stepSimulation(state: GameState, dtSeconds: number): void {
 
   // 2. Housing population growth (when happy & connected)
   for (const bld of Object.values(state.buildings)) {
-    if (bld.isConstructed === false) continue;
+    if (bld.isConstructed === false || justCompletedConstructionIds.has(bld.id)) continue;
     const def = BUILDINGS[bld.defId];
     if (!def?.housing) continue;
 
@@ -1031,7 +1055,7 @@ export function stepSimulation(state: GameState, dtSeconds: number): void {
   }
 
   for (const bld of Object.values(state.buildings)) {
-    if (bld.isConstructed === false) continue;
+    if (bld.isConstructed === false || justCompletedConstructionIds.has(bld.id)) continue;
     const def = BUILDINGS[bld.defId];
     if (!def) continue;
     if (!bld.paused) {
@@ -1070,7 +1094,7 @@ export function stepSimulation(state: GameState, dtSeconds: number): void {
 
   // 4. Production & Gathering buildings
   for (const bld of Object.values(state.buildings)) {
-    if (bld.isConstructed === false) continue;
+    if (bld.isConstructed === false || justCompletedConstructionIds.has(bld.id)) continue;
     const def = BUILDINGS[bld.defId];
     if (!def || !def.recipes || def.recipes.length === 0) continue;
 
@@ -1220,11 +1244,11 @@ export function isTutorialStepSatisfied(state: GameState, stepId: string): boole
   const hasConnectedSawmill = blds.some(
     (b) => b.defId === 'sawmill' && b.connectedToLogistics
   );
-  const hasHomesteadOrQuarry = blds.some(
-    (b) =>
-      b.defId === 'colonial_homestead' ||
-      b.defId === 'enlightened_manor' ||
-      (b.defId === 'quarry' && b.connectedToLogistics)
+  const hasConnectedQuarry = blds.some(
+    (b) => b.defId === 'quarry' && b.connectedToLogistics
+  );
+  const hasUpgradedHomestead = blds.some(
+    (b) => b.defId === 'colonial_homestead' || b.defId === 'enlightened_manor'
   );
   const hasConnectedAcademy = blds.some(
     (b) => b.defId === 'chronicle_observatory' && b.connectedToLogistics
@@ -1248,7 +1272,7 @@ export function isTutorialStepSatisfied(state: GameState, stepId: string): boole
     case 'unseal_future_knowledge':
       return state.unlockedTechIds.length >= 1;
     case 'quarry_and_upgrade':
-      return hasHomesteadOrQuarry;
+      return hasConnectedQuarry && hasUpgradedHomestead;
     case 'build_academy':
       return hasConnectedAcademy;
     default:
@@ -1339,10 +1363,13 @@ export function evaluateTutorialProgress(
     ) {
       state.completedTutorialStepIds.push(step.id);
 
-      // If the player was currently viewing this step (or an earlier step in sequence), advance to the next incomplete step
-      if (state.tutorialActive && state.tutorialStepIndex === step.index) {
+      // Advance the active step pointer unless the user is intentionally browsing an earlier step while the guide is open
+      const canAutoAdvance =
+        !state.tutorialBrowsingManually || !state.tutorialActive || state.tutorialStepIndex === step.index;
+      if (canAutoAdvance && state.tutorialStepIndex <= step.index) {
         completedStepTitle = step.title;
         advanced = true;
+        state.tutorialBrowsingManually = false;
         while (
           state.tutorialStepIndex < TUTORIAL_STEPS.length &&
           state.completedTutorialStepIds.includes(TUTORIAL_STEPS[state.tutorialStepIndex].id)
@@ -1373,6 +1400,7 @@ export function stepTutorial(state: GameState, delta: number): number {
     Math.min(TUTORIAL_STEPS.length - 1, state.tutorialStepIndex + delta)
   );
   state.tutorialStepIndex = nextIndex;
+  state.tutorialBrowsingManually = true;
   return state.tutorialStepIndex;
 }
 
@@ -1384,15 +1412,280 @@ export function advanceTutorialManually(state: GameState): boolean {
 export function dismissTutorial(state: GameState): void {
   state.introSeen = true;
   state.tutorialActive = false;
+  state.tutorialBrowsingManually = false;
 }
 
 export function toggleTutorial(state: GameState, forceState?: boolean): boolean {
   state.introSeen = true;
   state.tutorialActive = forceState !== undefined ? forceState : !state.tutorialActive;
-  if (state.tutorialActive && state.tutorialStepIndex >= TUTORIAL_STEPS.length) {
-    state.tutorialStepIndex = TUTORIAL_STEPS.length - 1;
+  if (state.tutorialActive) {
+    state.tutorialBrowsingManually = false;
+    // Sync completed steps and jump to the first incomplete step so reopening after dismissal resumes seamlessly
+    evaluateTutorialProgress(state);
+    const firstIncomplete = TUTORIAL_STEPS.findIndex(
+      (s) => !isTutorialStepSatisfied(state, s.id)
+    );
+    if (firstIncomplete !== -1) {
+      state.tutorialStepIndex = firstIncomplete;
+      if (TUTORIAL_STEPS[firstIncomplete].id === 'unseal_future_knowledge') {
+        unsealFutureTrunks(state);
+      }
+    } else {
+      state.tutorialStepIndex = TUTORIAL_STEPS.length - 1;
+    }
   }
   return state.tutorialActive;
+}
+
+function isTileConnectedIfPlaced(state: GameState, x: number, y: number): boolean {
+  const warehouses = Object.values(state.buildings).filter(
+    (b) => b.defId === 'founding_camp' && b.isConstructed !== false
+  );
+  if (warehouses.some((w) => Math.abs(w.x - x) + Math.abs(w.y - y) <= 2)) {
+    return true;
+  }
+  for (const nb of getOrthogonalNeighbors(state, x, y)) {
+    if (!nb.buildingId) continue;
+    const nbBld = state.buildings[nb.buildingId];
+    if (
+      nbBld &&
+      nbBld.isConstructed !== false &&
+      nbBld.connectedToLogistics &&
+      (nbBld.defId === 'founding_camp' || BUILDINGS[nbBld.defId]?.isRoad)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function findShortestRoadPath(
+  state: GameState,
+  targetX: number,
+  targetY: number
+): Array<{ x: number; y: number; label?: string }> {
+  const roadAllowed = BUILDINGS.dirt_road.allowedTerrains;
+  const startSet = new Set<string>();
+  const queue: Array<{ x: number; y: number }> = [];
+  const parent = new Map<string, string | null>();
+
+  for (const bld of Object.values(state.buildings)) {
+    if (
+      bld.connectedToLogistics &&
+      (bld.defId === 'founding_camp' || BUILDINGS[bld.defId]?.isRoad)
+    ) {
+      const k = `${bld.x},${bld.y}`;
+      startSet.add(k);
+      parent.set(k, null);
+      queue.push({ x: bld.x, y: bld.y });
+    }
+  }
+
+  // Fallback if warehouse is still under construction
+  if (queue.length === 0) {
+    for (const bld of Object.values(state.buildings)) {
+      if (bld.defId === 'founding_camp') {
+        const k = `${bld.x},${bld.y}`;
+        startSet.add(k);
+        parent.set(k, null);
+        queue.push({ x: bld.x, y: bld.y });
+      }
+    }
+  }
+
+  if (queue.length === 0) return [];
+
+  let goalKey: string | null = null;
+  while (queue.length > 0) {
+    const curr = queue.shift()!;
+    if (Math.abs(curr.x - targetX) + Math.abs(curr.y - targetY) === 1) {
+      goalKey = `${curr.x},${curr.y}`;
+      break;
+    }
+
+    for (const nb of getOrthogonalNeighbors(state, curr.x, curr.y)) {
+      const nKey = `${nb.x},${nb.y}`;
+      if (parent.has(nKey)) continue;
+      const existingBld = nb.buildingId ? state.buildings[nb.buildingId] : undefined;
+      const canTraverse =
+        (!nb.buildingId && roadAllowed.includes(nb.terrain)) ||
+        (existingBld && BUILDINGS[existingBld.defId]?.isRoad);
+      if (!canTraverse) continue;
+      parent.set(nKey, `${curr.x},${curr.y}`);
+      queue.push({ x: nb.x, y: nb.y });
+    }
+  }
+
+  if (!goalKey) return [];
+
+  const path: Array<{ x: number; y: number; label?: string }> = [];
+  let cur: string | null = goalKey;
+  while (cur && !startSet.has(cur)) {
+    const [cx, cy] = cur.split(',').map(Number);
+    const tile = getTile(state, cx, cy);
+    if (tile && !tile.buildingId) {
+      path.unshift({ x: cx, y: cy });
+    }
+    cur = parent.get(cur) ?? null;
+  }
+
+  if (path.length > 0) {
+    path[Math.floor(path.length / 2)].label = 'Connect Road';
+  }
+  return path;
+}
+
+export function getDynamicTutorialTargets(
+  state: GameState,
+  step?: TutorialStepDefinition
+): Array<{ x: number; y: number; label?: string }> {
+  const activeStep = step ?? TUTORIAL_STEPS[state.tutorialStepIndex];
+  if (!activeStep) return [];
+
+  const warehouses = Object.values(state.buildings).filter((b) => b.defId === 'founding_camp');
+  const primaryWarehouse = warehouses[0];
+  const anchorX = primaryWarehouse ? primaryWarehouse.x : 7;
+  const anchorY = primaryWarehouse ? primaryWarehouse.y : 8;
+
+  const canPlaceIgnoringCost = (defId: string, x: number, y: number): boolean => {
+    const def = BUILDINGS[defId];
+    const tile = getTile(state, x, y);
+    if (!def || !tile || tile.buildingId) return false;
+    if (!def.allowedTerrains.includes(tile.terrain)) return false;
+    if (def.adjacentTerrainRequired && def.adjacentTerrainRequired.length > 0) {
+      const neighbors = [tile, ...getOrthogonalNeighbors(state, x, y)];
+      if (!neighbors.some((n) => def.adjacentTerrainRequired!.includes(n.terrain))) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const findClosestValidTiles = (
+    defId: string,
+    requireConnected: boolean,
+    count: number,
+    primaryLabel: string
+  ): Array<{ x: number; y: number; label?: string }> => {
+    const candidates: Array<{ x: number; y: number; dist: number }> = [];
+    for (let y = 0; y < state.height; y++) {
+      for (let x = 0; x < state.width; x++) {
+        if (!canPlaceIgnoringCost(defId, x, y)) continue;
+        if (requireConnected && !isTileConnectedIfPlaced(state, x, y)) continue;
+        const dist = Math.abs(x - anchorX) + Math.abs(y - anchorY);
+        candidates.push({ x, y, dist });
+      }
+    }
+    candidates.sort((a, b) => a.dist - b.dist);
+    return candidates.slice(0, count).map((c, idx) => ({
+      x: c.x,
+      y: c.y,
+      label: idx === 0 ? primaryLabel : undefined
+    }));
+  };
+
+  switch (activeStep.id) {
+    case 'place_landing':
+      return findClosestValidTiles('founding_camp', false, 2, 'Suggested Landing');
+
+    case 'build_first_cabin': {
+      const connected = findClosestValidTiles('pioneer_cabin', true, 2, 'Build Pioneer Cabin');
+      return connected.length > 0
+        ? connected
+        : findClosestValidTiles('pioneer_cabin', false, 2, 'Build Pioneer Cabin');
+    }
+
+    case 'build_lumberjack':
+      return findClosestValidTiles('lumberjack_hut', false, 2, 'Build Lumberjack');
+
+    case 'connect_lumberjack_road': {
+      const lj = Object.values(state.buildings).find(
+        (b) => b.defId === 'lumberjack_hut' && !b.connectedToLogistics
+      );
+      if (lj) {
+        const roadPath = findShortestRoadPath(state, lj.x, lj.y);
+        if (roadPath.length > 0) return roadPath;
+      }
+      const fallbackLj = findClosestValidTiles('lumberjack_hut', false, 1, 'Build Lumberjack')[0];
+      if (fallbackLj) {
+        const roadPath = findShortestRoadPath(state, fallbackLj.x, fallbackLj.y);
+        if (roadPath.length > 0) return roadPath;
+      }
+      return activeStep.highlightTiles ?? [];
+    }
+
+    case 'build_fishery': {
+      const unconnectedFishery = Object.values(state.buildings).find(
+        (b) => b.defId === 'fishery' && !b.connectedToLogistics
+      );
+      if (unconnectedFishery) {
+        const roadPath = findShortestRoadPath(state, unconnectedFishery.x, unconnectedFishery.y);
+        if (roadPath.length > 0) return roadPath;
+      }
+      return findClosestValidTiles('fishery', false, 2, 'Build Fishery');
+    }
+
+    case 'build_sawmill': {
+      const unconnectedSawmill = Object.values(state.buildings).find(
+        (b) => b.defId === 'sawmill' && !b.connectedToLogistics
+      );
+      if (unconnectedSawmill) {
+        const roadPath = findShortestRoadPath(state, unconnectedSawmill.x, unconnectedSawmill.y);
+        if (roadPath.length > 0) return roadPath;
+      }
+      const connected = findClosestValidTiles('sawmill', true, 2, 'Build Sawmill');
+      return connected.length > 0
+        ? connected
+        : findClosestValidTiles('sawmill', false, 2, 'Build Sawmill');
+    }
+
+    case 'shelter_and_market': {
+      const hasMarket = Object.values(state.buildings).some((b) => b.defId === 'market_square');
+      const label = hasMarket ? 'Build Pioneer Cabin' : 'Build Market & Cabins';
+      const connected = findClosestValidTiles('market_square', true, 3, label);
+      return connected.length > 0
+        ? connected
+        : findClosestValidTiles('market_square', false, 3, label);
+    }
+
+    case 'quarry_and_upgrade': {
+      const unconnectedQuarry = Object.values(state.buildings).find(
+        (b) => b.defId === 'quarry' && !b.connectedToLogistics
+      );
+      if (unconnectedQuarry) {
+        const roadPath = findShortestRoadPath(state, unconnectedQuarry.x, unconnectedQuarry.y);
+        if (roadPath.length > 0) return roadPath;
+      }
+      const hasConnectedQuarry = Object.values(state.buildings).some(
+        (b) => b.defId === 'quarry' && b.connectedToLogistics && b.isConstructed !== false
+      );
+      if (!hasConnectedQuarry) {
+        return findClosestValidTiles('quarry', false, 2, 'Build Quarry');
+      }
+      const cabin = Object.values(state.buildings).find((b) => b.defId === 'pioneer_cabin');
+      if (cabin) {
+        return [{ x: cabin.x, y: cabin.y, label: 'Upgrade Cabin' }];
+      }
+      return findClosestValidTiles('quarry', false, 1, 'Build Quarry');
+    }
+
+    case 'build_academy': {
+      const unconnectedAcad = Object.values(state.buildings).find(
+        (b) => b.defId === 'chronicle_observatory' && !b.connectedToLogistics
+      );
+      if (unconnectedAcad) {
+        const roadPath = findShortestRoadPath(state, unconnectedAcad.x, unconnectedAcad.y);
+        if (roadPath.length > 0) return roadPath;
+      }
+      const connected = findClosestValidTiles('chronicle_observatory', true, 2, 'Build Academy');
+      return connected.length > 0
+        ? connected
+        : findClosestValidTiles('chronicle_observatory', false, 2, 'Build Academy');
+    }
+
+    default:
+      return activeStep.highlightTiles ?? [];
+  }
 }
 
 export function skipTutorial(state: GameState): void {

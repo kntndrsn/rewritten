@@ -10,7 +10,9 @@ import {
   createInitialGameState,
   demolishTile,
   dismissTutorial,
+  getDynamicTutorialTargets,
   getEffectiveBuildingCost,
+  isTutorialStepSatisfied,
   placeBuilding,
   resolveHistoricalEvent,
   skipTutorial,
@@ -370,6 +372,94 @@ describe('Rewritten Core Simulation Engine', () => {
       'Unlocked germ_theory should waive the 18 Insight cost for chlorinated_sand_filtration'
     );
     assert.equal(state.resources.stone, 0);
+  });
+
+  it('splits simulation ticks at construction completion boundaries so buildings do not operate retroactively', () => {
+    const state = createInitialGameState(1607, true);
+    state.resources.wood = 50;
+    const placed = placeBuilding(state, 'sawmill', 9, 7);
+    assert.equal(placed.success, true);
+    const sawmill = placed.building!;
+    assert.equal(sawmill.buildTimeSeconds, 8);
+
+    // Step 14s in one call: 8s should be spent constructing, leaving only 6s of production (< 14s cycle)
+    const planksBefore = state.resources.planks;
+    stepSimulation(state, 14);
+    assert.equal(sawmill.isConstructed, true);
+    assert.equal(
+      state.resources.planks,
+      planksBefore,
+      'Sawmill should only have 6s of post-construction operation, not a full 14s cycle'
+    );
+    assert.ok(sawmill.progressSeconds > 0 && sawmill.progressSeconds < 14);
+  });
+
+  it('requires both a connected Quarry and an upgraded Homestead for quarry_and_upgrade and resumes guide after dismissal', () => {
+    const state = createInitialGameState(1607);
+    // Dismiss guide on Step 1, then build and finish Warehouse while guide is dismissed
+    dismissTutorial(state);
+    assert.equal(state.tutorialActive, false);
+    placeBuilding(state, 'founding_camp', 7, 8);
+    stepSimulation(state, 3.5);
+
+    // Reopening the guide should advance to Step 2 (build_first_cabin) rather than staying stuck on Step 1
+    toggleTutorial(state, true);
+    assert.equal(state.tutorialStepIndex, 1);
+
+    // Verify quarry_and_upgrade requires BOTH quarry AND homestead
+    state.resources.wood = 100;
+    state.resources.planks = 100;
+    state.resources.stone = 100;
+    state.resources.fish = 100;
+    state.resources.coin = 500;
+    placeBuilding(state, 'pioneer_cabin', 8, 7);
+    placeBuilding(state, 'market_square', 9, 7);
+    placeBuilding(state, 'quarry', 13, 6);
+    // Use dynamic road pathfinder to connect the quarry at (13, 6) to the warehouse at (7, 8)
+    state.tutorialStepIndex = 8; // quarry_and_upgrade
+    const roadTiles = getDynamicTutorialTargets(state);
+    for (const rt of roadTiles) {
+      placeBuilding(state, 'dirt_road', rt.x, rt.y);
+    }
+    stepSimulation(state, 9);
+
+    assert.equal(
+      isTutorialStepSatisfied(state, 'quarry_and_upgrade'),
+      false,
+      'Quarry alone should not complete quarry_and_upgrade before upgrading a residence'
+    );
+
+    const cabin = Object.values(state.buildings).find((b) => b.defId === 'pioneer_cabin')!;
+    const upg = upgradeHouse(state, cabin.id);
+    assert.equal(upg.success, true);
+    assert.equal(
+      isTutorialStepSatisfied(state, 'quarry_and_upgrade'),
+      true,
+      'Both connected Quarry and upgraded Homestead should complete quarry_and_upgrade'
+    );
+  });
+
+  it('computes dynamic tutorial targets and road routes from arbitrary landing locations', () => {
+    const state = createInitialGameState(1607);
+    // Place the free Temporal Landing at (15, 6) instead of the default (7, 8)
+    const landing = placeBuilding(state, 'founding_camp', 15, 6);
+    assert.equal(landing.success, true);
+    stepSimulation(state, 3.5);
+    assert.equal(state.tutorialStepIndex, 1);
+
+    // Dynamic targets for Step 2 (build_first_cabin) should be near (15, 6) and connected!
+    const cabinTargets = getDynamicTutorialTargets(state);
+    assert.ok(cabinTargets.length > 0);
+    const firstTarget = cabinTargets[0];
+    const cabinRes = placeBuilding(state, 'pioneer_cabin', firstTarget.x, firstTarget.y);
+    assert.equal(cabinRes.success, true);
+    stepSimulation(state, 5.5);
+    assert.equal(
+      cabinRes.building?.connectedToLogistics,
+      true,
+      'Dynamically recommended cabin site near arbitrary landing (15, 6) must be connected'
+    );
+    assert.equal(state.tutorialStepIndex, 2);
   });
 });
 
