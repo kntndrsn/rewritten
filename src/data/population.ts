@@ -6,7 +6,7 @@ export const POPULATION_TIERS: Record<PopulationTierId, PopulationTierDefinition
     name: 'Pioneers',
     badge: '⛺',
     taxPer10PopPerMin: 9,
-    insightPer10PopPerMin: 0.35,
+    insightPer10PopPerMin: 0.6,
     description: 'Hardworking early settlers who felled the first trees. Require Fish and a nearby Market Square to thrive and upgrade.',
     needs: [
       {
@@ -31,7 +31,7 @@ export const POPULATION_TIERS: Record<PopulationTierId, PopulationTierDefinition
     name: 'Colonists',
     badge: '🏘️',
     taxPer10PopPerMin: 20,
-    insightPer10PopPerMin: 1.1,
+    insightPer10PopPerMin: 1.8,
     description: 'Skilled artisans and farmers who staff advanced workshops. Demand Bread, Tools, and Sanitation to join the Enlightened.',
     needs: [
       {

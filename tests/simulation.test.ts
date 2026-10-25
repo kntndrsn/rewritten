@@ -1,90 +1,156 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  MIN_DAYS_BETWEEN_EVENTS,
   SECONDS_PER_DAY,
-  advanceTutorialManually,
   canPlaceBuilding,
   canUnlockTech,
   canUpgradeHouse,
   checkAndTriggerHistoricalEvents,
   createInitialGameState,
   demolishTile,
+  dismissTutorial,
+  getEffectiveBuildingCost,
   placeBuilding,
   resolveHistoricalEvent,
   skipTutorial,
   stepSimulation,
+  stepTutorial,
+  toggleTutorial,
   unlockTech,
+  unsealFutureTrunks,
   upgradeHouse
 } from '../src/core/simulation.ts';
 import { TUTORIAL_STEPS } from '../src/data/tutorial.ts';
 
 describe('Rewritten Core Simulation Engine', () => {
-  it('initializes minimal landfall settlement with paced calendar and sealed trunks', () => {
-    const state = createInitialGameState(1607, true);
+  it('starts new games with zero auto-placed buildings and a free first Temporal Landing', () => {
+    const state = createInitialGameState(1607);
     assert.equal(state.width, 28);
     assert.equal(state.height, 20);
     assert.equal(SECONDS_PER_DAY, 25);
-    assert.equal(state.totalPopulation, 6, 'Expected 6 founding pioneers in the single starter cabin');
-    assert.equal(state.resources.insight, 4, 'Expected low starting Insight before trunks are unsealed');
-    assert.equal(state.tutorialActive, true);
-    assert.equal(state.tutorialStepIndex, 0);
+    assert.equal(Object.keys(state.buildings).length, 0, 'Expected 0 auto-placed buildings');
+    assert.equal(state.totalPopulation, 0);
+    assert.equal(state.resources.insight, 4);
+    assert.deepEqual(
+      getEffectiveBuildingCost(state, 'founding_camp'),
+      {},
+      'First Temporal Landing & Warehouse placement should be free'
+    );
 
-    const buildings = Object.values(state.buildings);
-    assert.equal(buildings.length, 4, 'Expected Founding Camp, 2 road tiles, and 1 Pioneer Cabin');
-    for (const bld of buildings) {
-      assert.equal(bld.connectedToLogistics, true, `Building ${bld.defId} should be connected`);
-    }
+    const beforeWood = state.resources.wood;
+    const beforeCoin = state.resources.coin;
+    const landing = placeBuilding(state, 'founding_camp', 7, 8);
+    assert.equal(landing.success, true);
+    assert.equal(state.resources.wood, beforeWood, 'Free first landing should deduct 0 wood');
+    assert.equal(state.resources.coin, beforeCoin, 'Free first landing should deduct 0 coin');
+
+    // Second warehouse costs normal resources
+    const secondCost = getEffectiveBuildingCost(state, 'founding_camp');
+    assert.ok((secondCost?.wood ?? 0) > 0, 'Second warehouse should require normal resources');
   });
 
-  it('walks through the 7-step tutorial and unseals Future Archives when basic survival is built', () => {
-    const state = createInitialGameState(1607, true);
+  it('walks through the tutorial from player-chosen landing to Academy and supports Back/Next/Dismiss', () => {
+    const state = createInitialGameState(1607);
     assert.equal(state.tutorialStepIndex, 0);
 
-    // Step 1: Survey Landing -> manual advance
-    advanceTutorialManually(state);
+    // Step 1: Place Temporal Landing at (7, 8)
+    placeBuilding(state, 'founding_camp', 7, 8);
+    assert.equal(state.tutorialStepIndex, 1, 'Should advance to Step 2 (Build Lumberjack)');
+
+    // Test stepping backward and forward manually
+    stepTutorial(state, -1);
+    assert.equal(state.tutorialStepIndex, 0);
+    stepTutorial(state, 1);
     assert.equal(state.tutorialStepIndex, 1);
 
-    // Step 2: Build Lumberjack Camp at (11, 7) (disconnected initially)
-    const lj = placeBuilding(state, 'lumberjack_hut', 11, 7);
-    assert.equal(lj.success, true);
-    assert.equal(state.tutorialStepIndex, 2, 'Should advance to Step 3 (Connect Road)');
+    // Test dismissing and toggling guide without granting duplicate Insight
+    const insightBeforeDismiss = state.resources.insight;
+    dismissTutorial(state);
+    assert.equal(state.tutorialActive, false);
+    assert.equal(state.resources.insight, insightBeforeDismiss);
+    toggleTutorial(state);
+    assert.equal(state.tutorialActive, true);
 
-    // Step 3: Connect Lumberjack Camp by road at (10, 8) and (11, 8)
+    // Step 2: Build Lumberjack Camp at (11, 7)
+    placeBuilding(state, 'lumberjack_hut', 11, 7);
+    assert.equal(state.tutorialStepIndex, 2);
+
+    // Step 3: Connect Lumberjack Camp by road at (8,8)..(11,8)
+    placeBuilding(state, 'dirt_road', 8, 8);
+    placeBuilding(state, 'dirt_road', 9, 8);
     placeBuilding(state, 'dirt_road', 10, 8);
     placeBuilding(state, 'dirt_road', 11, 8);
-    assert.equal(state.tutorialStepIndex, 3, 'Should advance to Step 4 (Build Fishery)');
+    assert.equal(state.tutorialStepIndex, 3);
 
     // Step 4: Build Fishery at (5, 8) and road at (6, 8)
     placeBuilding(state, 'dirt_road', 6, 8);
     placeBuilding(state, 'fishery', 5, 8);
-    assert.equal(state.tutorialStepIndex, 4, 'Should advance to Step 5 (Shelter & Market)');
+    assert.equal(state.tutorialStepIndex, 4);
 
-    // Step 5: Build 2 more Pioneer Cabins and 1 Market Square
+    // Step 5: Build 3 Pioneer Cabins and 1 Market Square
+    placeBuilding(state, 'pioneer_cabin', 8, 7);
     placeBuilding(state, 'pioneer_cabin', 8, 9);
     placeBuilding(state, 'pioneer_cabin', 9, 9);
     placeBuilding(state, 'market_square', 9, 7);
-    assert.equal(state.tutorialStepIndex, 5, 'Should advance to Step 6 (Build Sawmill)');
+    assert.equal(state.tutorialStepIndex, 5);
     assert.equal(state.trunksUnsealed, false);
 
-    // Step 6: Build Sawmill at (7, 7) -> unseals Future Archives (+20 Insight) and advances to Step 7
+    // Step 6: Build Sawmill at (7, 7) -> unseals Future Archives (+20 Insight once)
     placeBuilding(state, 'sawmill', 7, 7);
-    assert.equal(state.tutorialStepIndex, 6, 'Should advance to Step 7 (Unseal Future Knowledge)');
-    assert.equal(state.trunksUnsealed, true, 'Future trunks should be unsealed');
-    assert.ok(state.resources.insight >= 24, 'Should have received +20 Insight from trunks');
+    assert.equal(state.tutorialStepIndex, 6);
+    assert.equal(state.trunksUnsealed, true);
+    const insightAfterUnseal = state.resources.insight;
+    assert.ok(insightAfterUnseal >= 24);
 
-    // Step 7: Unlock first Future Knowledge breakthrough -> completes tutorial
-    const unlockRes = unlockTech(state, 'water_circular_saw');
-    assert.equal(unlockRes.success, true);
-    assert.equal(state.tutorialCompleted, true);
-    assert.equal(state.tutorialActive, false);
+    // Calling unsealFutureTrunks again must never grant another +20 Insight
+    assert.equal(unsealFutureTrunks(state), false);
+    assert.equal(state.resources.insight, insightAfterUnseal);
+
+    // Step 7: Unlock first Future Knowledge breakthrough -> advances to Step 8 (Quarry & Upgrade)
+    unlockTech(state, 'water_circular_saw');
+    assert.equal(state.tutorialStepIndex, 7);
   });
 
-  it('allows skipping the tutorial at any point', () => {
+  it('keeps tutorial text free of coordinate numbers and Anno references', () => {
+    for (const step of TUTORIAL_STEPS) {
+      const combined = `${step.title} ${step.subtitle} ${step.narrative} ${step.objectiveText}`;
+      assert.equal(
+        /\(\d+\s*,\s*\d+\)/.test(combined),
+        false,
+        `Step ${step.id} should not contain coordinate pairs: ${combined}`
+      );
+      assert.equal(
+        /anno/i.test(combined),
+        false,
+        `Step ${step.id} should not reference Anno: ${combined}`
+      );
+    }
+  });
+
+  it('awards mid-game milestone Insight and generates active Insight at the Time Traveler Academy', () => {
     const state = createInitialGameState(1607, true);
-    assert.equal(state.tutorialActive, true);
-    skipTutorial(state);
-    assert.equal(state.tutorialActive, false);
-    assert.equal(state.tutorialCompleted, true);
+    state.resources.planks = 50;
+    state.resources.stone = 50;
+    state.resources.tools = 50;
+    state.resources.coin = 500;
+
+    const beforeInsight = state.resources.insight;
+    // Place Time Traveler's Academy at (10, 7) adjacent to road (9, 8)/(9, 7)
+    placeBuilding(state, 'dirt_road', 10, 8);
+    const acad = placeBuilding(state, 'chronicle_observatory', 10, 7);
+    assert.equal(acad.success, true);
+    assert.ok(
+      state.resources.insight >= beforeInsight + 8,
+      'Building the first Academy should award the +8 Insight milestone bonus'
+    );
+
+    const afterMilestoneInsight = state.resources.insight;
+    stepSimulation(state, 16);
+    assert.ok(
+      state.resources.insight > afterMilestoneInsight + 3,
+      'Academy should produce passive Insight plus +3 Insight from compiling Field Notes'
+    );
   });
 
   it('validates terrain and adjacency rules when placing buildings', () => {
@@ -239,9 +305,25 @@ describe('Rewritten Core Simulation Engine', () => {
     );
 
     state.resources.tools = 4;
+    state.lastEventDay = 1;
     checkAndTriggerHistoricalEvents(state);
     assert.equal(state.activeEventId, 'indigenous_envoy_1611');
     resolveHistoricalEvent(state, 'indigenous_envoy_1611', 'guarded_barter');
+
+    // Enforces MIN_DAYS_BETWEEN_EVENTS cooldown before next event can trigger
+    assert.equal(state.lastEventDay, 18);
+    state.day = 24;
+    state.totalPopulation = 30;
+    checkAndTriggerHistoricalEvents(state);
+    assert.equal(
+      state.activeEventId,
+      null,
+      `Should enforce ${MIN_DAYS_BETWEEN_EVENTS}-day cooldown between historical events`
+    );
+
+    state.day = 18 + MIN_DAYS_BETWEEN_EVENTS;
+    checkAndTriggerHistoricalEvents(state);
+    assert.equal(state.activeEventId, 'marsh_fever_outbreak');
 
     // Test Germ Theory waiving 18 Insight on marsh_fever_outbreak
     state.unlockedTechIds.push('germ_theory');

@@ -8,16 +8,16 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     icon: '🏛️',
     color: '#3d5a80',
     accentColor: '#98c1d9',
-    description: 'Your expedition hub and central warehouse. Connects roads, stores +100 goods, and houses your hidden archive of future notes.',
+    description: 'Your expedition hub and central warehouse (First placement is FREE). Connects roads, stores +100 goods, and houses your archive of future notes.',
     cost: { wood: 30, planks: 15, stone: 10, coin: 120 },
-    upkeepCoinPerMin: 2,
+    upkeepCoinPerMin: 1,
     workersRequired: 0,
     allowedTerrains: ['grass', 'fertile_soil'],
     requiresRoad: false,
     serviceRadius: 8,
     serviceType: 'logistics',
     storageBonus: 100,
-    passiveInsightPerMin: 0.5,
+    passiveInsightPerMin: 1.2,
     paradoxDampeningPerMin: 0.4
   },
   dirt_road: {
@@ -409,17 +409,28 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     icon: '🔭',
     color: '#6d28d9',
     accentColor: '#c4b5fd',
-    description: 'Translates your future archives into colonial treatises. Generates +3 Insight/min, provides Knowledge within 7 tiles, and stabilizes Paradox.',
-    cost: { planks: 16, stone: 14, tools: 6, coin: 110 },
-    upkeepCoinPerMin: 5,
-    workersRequired: 5,
+    description: 'Translates your future archives into colonial treatises. Passively generates +3 Insight/min and actively compiles Field Notes for +3 Insight per cycle!',
+    cost: { planks: 12, stone: 8, tools: 4, coin: 80 },
+    upkeepCoinPerMin: 4,
+    workersRequired: 4,
     allowedTerrains: ['grass', 'fertile_soil'],
     requiresRoad: true,
     serviceRadius: 7,
     serviceType: 'knowledge',
     passiveInsightPerMin: 3.0,
     paradoxDampeningPerMin: 1.2,
-    divergenceOnBuild: 5
+    divergenceOnBuild: 5,
+    recipes: [
+      {
+        id: 'compile_field_notes',
+        name: 'Compile Colonial Field Notes',
+        inputs: { wood: 1 },
+        outputs: { insight: 3 },
+        cycleSeconds: 15,
+        isAnachronistic: true,
+        description: 'Adapts future theories to local timber and minerals, producing +3 Future Insight every 15 seconds.'
+      }
+    ]
   }
 };
 

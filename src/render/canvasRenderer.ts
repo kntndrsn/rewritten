@@ -37,6 +37,11 @@ export class CanvasRenderer {
   private downClientY = 0;
   private panStartX = 0;
   private panStartY = 0;
+  private isTouchPanning = false;
+  private touchMoved = false;
+  private touchStartX = 0;
+  private touchStartY = 0;
+  private lastPinchDist = 0;
   private keysPressed = new Set<string>();
   private animTime = 0;
 
@@ -174,6 +179,80 @@ export class CanvasRenderer {
       },
       { passive: false }
     );
+
+    // Mobile & Touch Gestures (1-finger pan/tap, 2-finger pinch-zoom)
+    this.canvas.addEventListener(
+      'touchstart',
+      (e) => {
+        if (e.touches.length === 1) {
+          const t = e.touches[0];
+          this.isTouchPanning = true;
+          this.touchMoved = false;
+          this.touchStartX = t.clientX;
+          this.touchStartY = t.clientY;
+          this.panStartX = t.clientX - this.camera.offsetX;
+          this.panStartY = t.clientY - this.camera.offsetY;
+          this.hoveredTile = this.screenToTile(t.clientX, t.clientY);
+        } else if (e.touches.length === 2) {
+          this.isTouchPanning = false;
+          this.touchMoved = true;
+          const t1 = e.touches[0];
+          const t2 = e.touches[1];
+          this.lastPinchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        }
+      },
+      { passive: true }
+    );
+
+    this.canvas.addEventListener(
+      'touchmove',
+      (e) => {
+        e.preventDefault();
+        if (e.touches.length === 1 && this.isTouchPanning) {
+          const t = e.touches[0];
+          if (Math.hypot(t.clientX - this.touchStartX, t.clientY - this.touchStartY) > 6) {
+            this.touchMoved = true;
+          }
+          if (this.touchMoved) {
+            this.camera.offsetX = t.clientX - this.panStartX;
+            this.camera.offsetY = t.clientY - this.panStartY;
+          }
+        } else if (e.touches.length === 2) {
+          const t1 = e.touches[0];
+          const t2 = e.touches[1];
+          const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+          if (this.lastPinchDist > 10 && dist > 10) {
+            const rect = this.canvas.getBoundingClientRect();
+            const midX = (t1.clientX + t2.clientX) / 2 - rect.left;
+            const midY = (t1.clientY + t2.clientY) / 2 - rect.top;
+            const prevZoom = this.camera.zoom;
+            const nextZoom = Math.max(0.55, Math.min(1.85, prevZoom * (dist / this.lastPinchDist)));
+            const worldX = (midX - this.camera.offsetX) / prevZoom;
+            const worldY = (midY - this.camera.offsetY) / prevZoom;
+            this.camera.zoom = nextZoom;
+            this.camera.offsetX = midX - worldX * nextZoom;
+            this.camera.offsetY = midY - worldY * nextZoom;
+          }
+          this.lastPinchDist = dist;
+        }
+      },
+      { passive: false }
+    );
+
+    this.canvas.addEventListener('touchend', (e) => {
+      if (!this.touchMoved && e.changedTouches.length === 1) {
+        const t = e.changedTouches[0];
+        const coords = this.screenToTile(t.clientX, t.clientY);
+        this.hoveredTile = coords;
+        if (coords && this.onTileClickCallback) {
+          this.onTileClickCallback(coords.x, coords.y, 0);
+        }
+      }
+      if (e.touches.length === 0) {
+        this.isTouchPanning = false;
+        this.lastPinchDist = 0;
+      }
+    });
   }
 
   public screenToTile(clientX: number, clientY: number): { x: number; y: number } | null {
@@ -736,7 +815,7 @@ export class CanvasRenderer {
     state: GameState,
     ts: number
   ): void {
-    if (!state.tutorialActive || state.tutorialCompleted) return;
+    if (!state.tutorialActive) return;
     const step = TUTORIAL_STEPS[state.tutorialStepIndex];
     if (!step?.highlightTiles) return;
 

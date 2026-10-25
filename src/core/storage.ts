@@ -23,7 +23,10 @@ export function loadGameFromStorage(): GameState | null {
     if (typeof parsed.tutorialActive !== 'boolean') parsed.tutorialActive = false;
     if (typeof parsed.tutorialStepIndex !== 'number') parsed.tutorialStepIndex = 0;
     if (typeof parsed.tutorialCompleted !== 'boolean') parsed.tutorialCompleted = true;
+    if (!Array.isArray(parsed.completedTutorialStepIds)) parsed.completedTutorialStepIds = [];
+    if (!Array.isArray(parsed.achievedMilestoneIds)) parsed.achievedMilestoneIds = [];
     if (typeof parsed.trunksUnsealed !== 'boolean') parsed.trunksUnsealed = true;
+    if (typeof parsed.lastEventDay !== 'number') parsed.lastEventDay = 1;
     recalculateNetworkAndCapacities(parsed);
     return parsed;
   } catch {
