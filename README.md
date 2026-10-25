@@ -41,6 +41,25 @@ npm test
 npm run dev
 ```
 
+## Deploying to a Web Server
+
+`npm run build` compiles the entire game into static files inside the `dist/` directory (`index.html`, `styles.css`, and `bundle.js`) with no backend server required.
+
+### Option 1: GitHub Pages (Included Workflow)
+A ready-to-use GitHub Actions workflow is included at `.github/workflows/deploy-pages.yml`:
+1. In your GitHub repository (`kntndrsn/rewritten`), go to **Settings ➔ Pages**.
+2. Under **Build and deployment ➔ Source**, select **GitHub Actions**.
+3. Merge this branch into `main` (or go to **Actions ➔ Deploy Rewritten to GitHub Pages ➔ Run workflow** and select this branch).
+4. Your game will be live at `https://kntndrsn.github.io/rewritten/`.
+
+### Option 2: Cloudflare Pages, Netlify, or Vercel
+Import the `kntndrsn/rewritten` repository and use:
+- **Build Command**: `npm run build`
+- **Output / Publish Directory**: `dist`
+
+### Option 3: Any Static Web Server (Nginx, Apache, Caddy, S3)
+Run `npm run build` and upload the contents of `dist/` (`index.html`, `styles.css`, `bundle.js`) to your web root.
+
 ## License & Attribution
 
 See [`LICENSE`](./LICENSE) for details:
